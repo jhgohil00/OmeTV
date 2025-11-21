@@ -16,7 +16,7 @@ BOT_TOKEN = "7392244323:AAEtT6oMRrAJAqkWaOEUumi51DTMIqkFKM4"
 DATABASE_URL = "postgresql://neondb_owner:npg_bXwJRd61ZjUg@ep-winter-glitter-a1ic6wxx-pooler.ap-southeast-1.aws.neon.tech/neondb?sslmode=require"
 
 # 👑 YOUR ADMIN ID (Get this from @userinfobot)
-ADMIN_IDS = [123456789]  # <--- REPLACE WITH YOUR ID
+ADMIN_IDS = [8315364356]  # <--- REPLACE WITH YOUR ID
 
 # ==============================================================================
 # ❤️ THE HEARTBEAT (Prevent Render from sleeping)
