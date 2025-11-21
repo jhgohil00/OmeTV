@@ -5,7 +5,7 @@ import asyncio
 import os
 import threading
 from flask import Flask
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update, error
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardRemove, Update, error
 from telegram.ext import ApplicationBuilder, ContextTypes, CommandHandler, CallbackQueryHandler, MessageHandler, filters
 from telegram.request import HTTPXRequest
 
@@ -28,9 +28,7 @@ def health_check():
     return "Bot is Alive!", 200
 
 def run_flask():
-    # Render assigns a random port in the environment variable 'PORT'
     port = int(os.environ.get("PORT", 8080))
-    # Run Flask without blocking the bot
     app_flask.run(host="0.0.0.0", port=port)
 
 # ==============================================================================
@@ -109,7 +107,7 @@ def init_db():
     conn.commit()
     cur.close()
     conn.close()
-    print("\n✅ PHASE 8 READY: Cloud Heartbeat Active.\n")
+    print("\n✅ CLOUD PHASE READY: Production Mode.\n")
 
 # ==============================================================================
 # 🧠 MATCHMAKING ENGINE
@@ -254,7 +252,7 @@ async def admin_broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("✅ Broadcast done.")
 
 # ==============================================================================
-# 📱 BOT INTERFACE
+# 📱 BOT INTERFACE & ONBOARDING
 # ==============================================================================
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -277,16 +275,27 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     conn.commit()
     conn.close()
 
+    # --- THE GHOST BUTTON FIX ---
+    # This checks for a specific flag or just sends a "Refresh" message
+    # We send the Welcome Text with ReplyKeyboardRemove to kill the old buttons
+    welcome_msg = (
+        "👋 **Welcome to OmeTV Chatbot!**\n\n"
+        "Connect with strangers worldwide. 🌍\n"
+        "No names. No login. Just chat.\n\n"
+        "*First, let's do a quick vibe check to find your best match.* 👇"
+    )
+    
     if not data or data[1] == 'Hidden':
-        await update.message.reply_text(
-            "👋 **Welcome to OmeTV Chatbot!**\n\n"
-            "Connect with strangers worldwide. 🌍\n"
-            "No names. No login. Just chat.\n\n"
-            "*First, let's do a quick vibe check to find your best match.* 👇",
-            parse_mode='Markdown'
-        )
+        # New User: Kill keyboard AND show onboarding
+        await update.message.reply_text(welcome_msg, reply_markup=ReplyKeyboardRemove(), parse_mode='Markdown')
         await send_onboarding_step(update, 1)
     else:
+        # Existing User: Just kill keyboard then show menu
+        # We send a tiny "Refreshing..." message to remove the keyboard, then show menu
+        msg = await update.message.reply_text("🔄 Loading...", reply_markup=ReplyKeyboardRemove())
+        try:
+            await context.bot.delete_message(chat_id=user.id, message_id=msg.message_id)
+        except: pass
         await show_main_menu(update)
 
 async def send_onboarding_step(update, step):
@@ -355,7 +364,17 @@ async def show_main_menu(update: Update):
     except error.BadRequest: pass
 
 async def send_reroll_option(context: ContextTypes.DEFAULT_TYPE):
-    pass
+    job = context.job
+    user_id = job.data
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute("SELECT status FROM users WHERE user_id = %s", (user_id,))
+    res = cur.fetchone()
+    conn.close()
+    if res and res[0] == 'searching':
+        keyboard = [[InlineKeyboardButton("🎲 Try Random Match", callback_data="force_random")]]
+        try: await context.bot.send_message(user_id, "🐢 **Taking a while...**\nWe are still looking for your specific match.", reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='Markdown')
+        except: pass
 
 # --- HANDLERS ---
 
@@ -537,7 +556,8 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         cur.execute("UPDATE users SET status = 'searching' WHERE user_id = %s", (user_id,))
         conn.commit()
         conn.close()
-        if data == "action_search" and context.job_queue:
+        # JobQueue enabled for Cloud!
+        if data == "action_search":
             context.job_queue.run_once(send_reroll_option, 15, data=user_id)
         await perform_match(update, context, user_id)
 
@@ -711,14 +731,14 @@ async def handle_report(update, context, reporter_id, reported_id):
 
 if __name__ == '__main__':
     init_db()
-    # START HEARTBEAT
+    # Start Heartbeat for Render
     flask_thread = threading.Thread(target=run_flask)
     flask_thread.daemon = True
     flask_thread.start()
     
-    # START BOT (Safe Timeout Config)
+    # Start Bot with JobQueue ENABLED (Production Mode)
     request = HTTPXRequest(connect_timeout=60, read_timeout=60)
-    app = ApplicationBuilder().token(BOT_TOKEN).job_queue(None).request(request).build()
+    app = ApplicationBuilder().token(BOT_TOKEN).request(request).build()
     
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("admin", admin_panel))
@@ -727,5 +747,5 @@ if __name__ == '__main__':
     app.add_handler(CommandHandler("broadcast", admin_broadcast))
     app.add_handler(CallbackQueryHandler(button_handler))
     app.add_handler(MessageHandler(filters.ALL, handle_message))
-    print("🤖 Phase 8 Bot Running (With Heartbeat)...")
+    print("🤖 CLOUD BOT LAUNCHED...")
     app.run_polling()
