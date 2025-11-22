@@ -5,6 +5,7 @@ import datetime
 import asyncio
 import os
 import threading
+import random  # <--- NEW
 from flask import Flask
 from telegram import (
     InlineKeyboardButton, InlineKeyboardMarkup, 
@@ -32,6 +33,31 @@ logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s
 # ==============================================================================
 # 1. RAM CACHE: Stores who is chatting with whom. Instant access. 0ms Latency.
 ACTIVE_CHATS = {} 
+# --- GAME STATE & DATA ---
+GAME_STATES = {}       # {user_id: {'game': 'tod', 'turn': uid, 'partner': pid}}
+GAME_COOLDOWNS = {}    # {user_id: timestamp}
+
+GAME_DATA = {
+    "tod_truth": [
+        "What is your biggest fear?", "What is the last lie you told?", "Who is your secret crush?",
+        "What is your most embarrassing moment?", "Have you ever cheated on a test?",
+        "What is the worst gift you ever received?", "What is your biggest regret?",
+        "When was the last time you cried?", "What is a secret you've never told anyone?",
+        "If you could switch lives with one person, who would it be?"
+    ],
+    "tod_dare": [
+        "Send a voice note singing 'Happy Birthday'.", "Send the 3rd photo in your gallery.",
+        "Type a message with your nose.", "Send a sticker that describes you.",
+        "Do 10 pushups and send a video note.",
+        "Talk in emojis for the next 3 turns.", "Describe your crush without naming them.",
+        "Send a screenshot of your home screen."
+    ],
+    "wyr": [
+        ("Be invisible", "Be able to fly"), ("Always be cold", "Always be hot"),
+        ("Have unlimited money", "Have unlimited time"), ("Know how you die", "Know when you die"),
+        ("Explore Space", "Explore the Ocean"), ("Talk to animals", "Speak all languages")
+    ]
+}
 
 # 2. DB POOL: Keeps connections open so we don't "dial" the DB every time.
 DB_POOL = None
@@ -199,6 +225,67 @@ def find_match(user_id):
 # ==============================================================================
 # 👮 ADMIN SYSTEM
 # ==============================================================================
+# ==============================================================================
+# 🎮 GAME ENGINE LOGIC
+# ==============================================================================
+async def offer_game(update, context, user_id, game_name):
+    partner_id = ACTIVE_CHATS.get(user_id)
+    if not partner_id: return
+    
+    # Cooldown
+    last = GAME_COOLDOWNS.get(user_id, 0)
+    if time.time() - last < 60:
+        await context.bot.send_message(user_id, f"⏳ Wait {int(60 - (time.time() - last))}s before sending another request.")
+        return
+    GAME_COOLDOWNS[user_id] = time.time()
+
+    # Suggestion Logic
+    all_games = ["Truth or Dare", "Would You Rather", "Rock Paper Scissors"]
+    suggestions = [g for g in all_games if g != game_name]
+    
+    kb = [
+        [InlineKeyboardButton("✅ Accept", callback_data=f"game_accept_{game_name}"), InlineKeyboardButton("❌ Reject", callback_data="game_reject")],
+        [InlineKeyboardButton(f"💡 Suggest {suggestions[0]}", callback_data=f"game_offer_{suggestions[0]}"),
+         InlineKeyboardButton(f"💡 Suggest {suggestions[1]}", callback_data=f"game_offer_{suggestions[1]}")]
+    ]
+    
+    await context.bot.send_message(user_id, f"🎮 **Offered {game_name}**\nWaiting for partner...", parse_mode='Markdown')
+    await context.bot.send_message(partner_id, f"🎮 **Game Request**\nPartner wants to play **{game_name}**.", reply_markup=InlineKeyboardMarkup(kb), parse_mode='Markdown')
+
+async def start_game_session(update, context, game_name, p1, p2):
+    GAME_STATES[p1] = GAME_STATES[p2] = {"game": game_name, "turn": p1, "partner": p2}
+    kb_game = get_keyboard_game()
+    await context.bot.send_message(p1, f"🎮 **Started: {game_name}**", reply_markup=kb_game, parse_mode='Markdown')
+    await context.bot.send_message(p2, f"🎮 **Started: {game_name}**", reply_markup=kb_game, parse_mode='Markdown')
+    
+    if game_name == "Truth or Dare": await send_tod_turn(context, p1)
+    elif game_name == "Would You Rather": await send_wyr_round(context, p1, p2)
+    elif game_name == "Rock Paper Scissors": await send_rps_round(context, p1, p2)
+
+async def send_tod_turn(context, turn_id):
+    kb = [[InlineKeyboardButton("🟢 Truth", callback_data="tod_pick_truth"), InlineKeyboardButton("🔴 Dare", callback_data="tod_pick_dare")]]
+    await context.bot.send_message(turn_id, "🫵 **Your Turn!** Choose:", reply_markup=InlineKeyboardMarkup(kb), parse_mode='Markdown')
+
+async def send_tod_options(update, context, mode):
+    user = update.effective_user
+    options = random.sample(GAME_DATA[f"tod_{mode}"], 5)
+    kb = [[InlineKeyboardButton(opt[:30]+"...", callback_data=f"tod_send_{i}")] for i, opt in enumerate(options)]
+    kb.append([InlineKeyboardButton("✍️ Ask Yourself (Type)", callback_data="tod_manual")])
+    
+    GAME_STATES[user.id]["options"] = options
+    await update.callback_query.edit_message_text(f"🎭 **Pick a {mode.upper()}:**", reply_markup=InlineKeyboardMarkup(kb), parse_mode='Markdown')
+
+async def send_wyr_round(context, p1, p2):
+    q = random.choice(GAME_DATA["wyr"])
+    kb = [[InlineKeyboardButton(f"🅰️ {q[0]}", callback_data="wyr_a"), InlineKeyboardButton(f"🅱️ {q[1]}", callback_data="wyr_b")]]
+    await context.bot.send_message(p1, "⚖️ **Would You Rather...**", reply_markup=InlineKeyboardMarkup(kb), parse_mode='Markdown')
+    await context.bot.send_message(p2, "⚖️ **Would You Rather...**", reply_markup=InlineKeyboardMarkup(kb), parse_mode='Markdown')
+
+async def send_rps_round(context, p1, p2):
+    kb = [[InlineKeyboardButton("🪨", callback_data="rps_rock"), InlineKeyboardButton("📄", callback_data="rps_paper"), InlineKeyboardButton("✂️", callback_data="rps_scissors")]]
+    await context.bot.send_message(p1, "✂️ **Shoot!**", reply_markup=InlineKeyboardMarkup(kb))
+    await context.bot.send_message(p2, "✂️ **Shoot!**", reply_markup=InlineKeyboardMarkup(kb))
+
 async def admin_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id not in ADMIN_IDS: return
     conn = get_conn(); cur = conn.cursor()
@@ -351,8 +438,34 @@ async def handle_text_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("⚙️ **Settings:**", reply_markup=InlineKeyboardMarkup(kb)); return
     if text == "🪪 My ID": await show_profile(update, context); return
     if text == "🆘 Help": await help_command(update, context); return
-    if text == "🎮 Games": await update.message.reply_text("🎮 Games coming soon!", reply_markup=get_keyboard_game()); return
-    if text == "🛑 Stop Game": await update.message.reply_text("🎮 Game Ended.", reply_markup=get_keyboard_chat()); return
+   # 1. Manual Game Input Trap
+    if context.user_data.get("state") == "GAME_MANUAL":
+        pid = ACTIVE_CHATS.get(user_id)
+        if pid:
+            await context.bot.send_message(pid, f"❓ **Question:** {text}", parse_mode='Markdown')
+            await update.message.reply_text("✅ Sent.")
+            # Swap turns
+            GAME_STATES[user_id]["turn"] = pid
+            GAME_STATES[pid]["turn"] = pid
+            if GAME_STATES[user_id]["game"] == "Truth or Dare": await send_tod_turn(context, pid)
+        context.user_data["state"] = None
+        return
+
+    # 2. Game Menu Trigger
+    if text == "🎮 Games":
+        kb = [[InlineKeyboardButton("😈 Truth or Dare", callback_data="game_offer_Truth or Dare")],
+              [InlineKeyboardButton("🎲 Would You Rather", callback_data="game_offer_Would You Rather")],
+              [InlineKeyboardButton("✂️ Rock Paper Scissors", callback_data="game_offer_Rock Paper Scissors")]]
+        await update.message.reply_text("🎮 **Game Center**\nSelect a game to offer:", reply_markup=InlineKeyboardMarkup(kb), parse_mode='Markdown'); return
+    
+    # 3. Stop Game Logic
+    if text == "🛑 Stop Game":
+        pid = ACTIVE_CHATS.get(user_id)
+        if user_id in GAME_STATES: del GAME_STATES[user_id]
+        if pid and pid in GAME_STATES: del GAME_STATES[pid]
+        await update.message.reply_text("🛑 Game Stopped.", reply_markup=get_keyboard_chat())
+        if pid: await context.bot.send_message(pid, "🛑 Partner stopped the game.", reply_markup=get_keyboard_chat())
+        return
 
     if text.startswith("/feedback"): await handle_feedback_command(update, context); return
     if text == "/admin": await admin_panel(update, context); return
@@ -412,7 +525,9 @@ async def stop_chat(update, context, is_next=False):
     # Clear RAM Cache immediately
     partner_id = ACTIVE_CHATS.pop(user_id, 0)
     if partner_id and partner_id in ACTIVE_CHATS: del ACTIVE_CHATS[partner_id]
-
+# Clear Game States on Disconnect
+    if user_id in GAME_STATES: del GAME_STATES[user_id]
+    if partner_id in GAME_STATES: del GAME_STATES[partner_id]
     # Clear DB
     conn = get_conn(); cur = conn.cursor()
     cur.execute("UPDATE users SET status='idle', partner_id=0 WHERE user_id IN (%s, %s)", (user_id, partner_id))
@@ -517,6 +632,33 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if data == "force_random": await perform_match(update, context, uid); return
     if data == "close_settings": await q.delete_message(); return
+# --- GAME HANDLERS ---
+    if data.startswith("game_offer_"):
+        await offer_game(update, context, uid, data.split("_", 2)[2]); return
+    if data.startswith("game_accept_"):
+        game = data.split("_", 2)[2]; pid = ACTIVE_CHATS.get(uid)
+        if pid: await start_game_session(update, context, game, pid, uid)
+        return
+    if data == "game_reject":
+        pid = ACTIVE_CHATS.get(uid)
+        if pid: await context.bot.send_message(pid, "❌ **Partner declined.**", parse_mode='Markdown')
+        await q.edit_message_text("❌ Declined."); return
+        
+    if data.startswith("tod_pick_"):
+        mode = data.split("_")[2] # truth or dare
+        await send_tod_options(update, context, mode); return
+    
+    if data.startswith("tod_send_"): 
+        gd = GAME_STATES.get(uid)
+        if gd:
+            q_text = gd["options"][int(data.split("_")[2])]
+            pid = gd["partner"]
+            await context.bot.send_message(pid, f"🎲 **QUESTION:**\n{q_text}", parse_mode='Markdown')
+            await q.edit_message_text(f"✅ Sent: {q_text}")
+            GAME_STATES[uid]["turn"] = pid; GAME_STATES[pid]["turn"] = pid
+            await send_tod_turn(context, pid)
+        return
+    if data == "tod_manual": context.user_data["state"] = "GAME_MANUAL"; await q.edit_message_text("✍️ **Type your question now:**"); return
     
     # Onboarding
     if data.startswith("set_gen_"): await update_user(uid, "gender", data.split("_")[2]); await send_onboarding_step(update, 2); return
@@ -634,5 +776,5 @@ if __name__ == '__main__':
         app.add_handler(CallbackQueryHandler(button_handler))
         app.add_handler(MessageHandler(filters.ALL, relay_message))
         
-        print("🤖 PHASE 14 BOT LIVE")
+        print("🤖 PHASE 15 BOT LIVE")
         app.run_polling()
