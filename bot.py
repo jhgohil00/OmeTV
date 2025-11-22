@@ -6,6 +6,7 @@ import asyncio
 import os
 import threading
 import random  # <--- NEW
+import time  # <--- THIS WAS MISSING
 from flask import Flask
 from telegram import (
     InlineKeyboardButton, InlineKeyboardMarkup, 
@@ -776,5 +777,5 @@ if __name__ == '__main__':
         app.add_handler(CallbackQueryHandler(button_handler))
         app.add_handler(MessageHandler(filters.ALL, relay_message))
         
-        print("🤖 PHASE 15 BOT LIVE")
+        print("🤖 PHASE 14 BOT LIVE")
         app.run_polling()
