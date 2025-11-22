@@ -432,7 +432,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await show_main_menu(update)
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("🆘 **HELP**\n\n🚀 Start: Match\n🛑 Stop: End\n📨 Feedback: `/feedback msg`", parse_mode='Markdown')
+    await update.message.reply_text("🆘 **HELP**\n\n🚀 Start: Dive into World\n🛑 Stop: End Chat\n📨 Send Your Feedback: `/feedback msg`", parse_mode='Markdown')
 
 async def handle_text_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message: return
@@ -636,7 +636,7 @@ async def show_profile(update, context):
 
 async def show_main_menu(update):
     try: 
-        if update.message: await update.message.reply_text("👋 **Lobby**", reply_markup=get_keyboard_lobby(), parse_mode='Markdown')
+        if update.message: await update.message.reply_text(""👋 **Welcome to OmeTV Chatbot!**🤖\n\nConnect with strangers worldwide. 🌍\n", reply_markup=get_keyboard_lobby(), parse_mode='Markdown')
         elif update.callback_query: await update.callback_query.message.reply_text("👋 **Lobby**", reply_markup=get_keyboard_lobby(), parse_mode='Markdown')
     except: pass
 
