@@ -254,86 +254,83 @@ async def send_reroll_option(context: ContextTypes.DEFAULT_TYPE):
     cur.close(); release_conn(conn)
 
 # ==============================================================================
-# 📱 COMMAND HANDLERS & EXECUTION
+# 📱 MAIN HANDLERS
 # ==============================================================================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     conn = get_conn(); cur = conn.cursor()
     
+    # Ban Check
     cur.execute("SELECT banned_until, gender FROM users WHERE user_id = %s", (user.id,))
     data = cur.fetchone()
     if data and data[0] and data[0] > datetime.datetime.now():
-        await update.message.reply_text(f"🚫 Banned until {data[0]}.")
-        cur.close(); release_conn(conn); return
+        await update.message.reply_text(f"🚫 Banned until {data[0]}."); cur.close(); release_conn(conn); return
 
-    cur.execute("""
-        INSERT INTO users (user_id, username, first_name) VALUES (%s, %s, %s)
-        ON CONFLICT (user_id) DO UPDATE SET username = %s, first_name = %s
-    """, (user.id, user.username, user.first_name, user.username, user.first_name))
+    # Register User
+    cur.execute("""INSERT INTO users (user_id, username, first_name) VALUES (%s, %s, %s) 
+                   ON CONFLICT (user_id) DO UPDATE SET username = %s, first_name = %s""", 
+                   (user.id, user.username, user.first_name, user.username, user.first_name))
     conn.commit(); cur.close(); release_conn(conn)
-
-    welcome_msg = (
-        "👋 **Welcome to OmeTV Chatbot!**\n\n"
-        "Connect with strangers worldwide. 🌍\n"
-        "No names. No login. Just chat.\n\n"
-        "*First, let's do a quick vibe check to find your best match.* 👇"
-    )
-
+    
+    welcome = "👋 **Welcome to OmeTV Chatbot!**\n\nConnect with strangers worldwide. 🌍\nNo names. No login.\n\n*Let's vibe check.* 👇"
+    
     if not data or data[1] == 'Hidden':
-        await update.message.reply_text(welcome_msg, reply_markup=ReplyKeyboardRemove(), parse_mode='Markdown')
+        await update.message.reply_text(welcome, reply_markup=ReplyKeyboardRemove(), parse_mode='Markdown')
         await send_onboarding_step(update, 1)
     else:
+        # Ghost Button Fix
         msg = await update.message.reply_text("🔄 Loading...", reply_markup=ReplyKeyboardRemove())
         try: await context.bot.delete_message(chat_id=user.id, message_id=msg.message_id)
         except: pass
         await show_main_menu(update)
 
+async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    txt = "🆘 **HELP**\n\n🚀 Start: Match\n🛑 Stop: End\n🎮 Games: Play\n📨 Feedback: `/feedback msg`"
+    await update.message.reply_text(txt, parse_mode='Markdown')
+
+# ==============================================================================
+# 🎮 CONTROLLER
+# ==============================================================================
 async def handle_text_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message: return
     text = update.message.text
     user_id = update.effective_user.id
 
-    # Manual Game Question Input
+    # Manual Game Input
     if context.user_data.get("state") == "GAME_MANUAL":
-        partner_id = ACTIVE_CHATS.get(user_id)
-        if partner_id:
-            await context.bot.send_message(partner_id, f"❓ **Question:** {text}", parse_mode='Markdown')
+        pid = ACTIVE_CHATS.get(user_id)
+        if pid:
+            await context.bot.send_message(pid, f"❓ **Question:** {text}", parse_mode='Markdown')
             await update.message.reply_text("✅ Sent.")
-            # Swap turns
-            GAME_STATES[user_id]["turn"] = partner_id
-            GAME_STATES[partner_id]["turn"] = partner_id
-            if GAME_STATES[user_id]["game"] == "Truth or Dare": await send_tod_turn(context, partner_id)
-        context.user_data["state"] = None
-        return
+            # Swap Turn
+            GAME_STATES[user_id]["turn"] = pid; GAME_STATES[pid]["turn"] = pid
+            if GAME_STATES[user_id]["game"] == "Truth or Dare": await send_tod_turn(context, pid)
+        context.user_data["state"] = None; return
 
+    # Onboarding Input
     if context.user_data.get("state") == "ONBOARDING_INTEREST":
         await update_user_profile(user_id, "interests", text)
         context.user_data["state"] = None
-        await update.message.reply_text("✅ **Vibe Check Complete!**", reply_markup=get_keyboard_lobby(), parse_mode='Markdown')
-        return
+        await update.message.reply_text("✅ **Ready!**", reply_markup=get_keyboard_lobby(), parse_mode='Markdown'); return
 
+    # Buttons
     if text == "🚀 Start Matching": await start_search(update, context); return
     if text in ["🛑 Stop", "🛑 Stop Chat"]: await stop_chat(update, context); return
     if text == "⏭️ Next": await stop_chat(update, context, is_next=True); return
     if text == "❌ Stop Searching": await stop_search_process(update, context); return
-    if text == "🎯 Change Interests":
-        context.user_data["state"] = "ONBOARDING_INTEREST"
-        await update.message.reply_text("👇 **Type new interests:**", reply_markup=ReplyKeyboardRemove(), parse_mode='Markdown'); return
+    if text == "🎯 Change Interests": context.user_data["state"] = "ONBOARDING_INTEREST"; await update.message.reply_text("👇 Type interests:", reply_markup=ReplyKeyboardRemove()); return
     
     if text == "⚙️ Settings":
-        kb = [[InlineKeyboardButton("🚻 Gender", callback_data="set_gen_Hidden"), InlineKeyboardButton("🎂 Age", callback_data="set_age_Hidden")],
-              [InlineKeyboardButton("🗣️ Lang", callback_data="set_lang_English"), InlineKeyboardButton("🎭 Mood", callback_data="set_mood_Neutral")],
-              [InlineKeyboardButton("🔙 Close", callback_data="close_settings")]]
-        await update.message.reply_text("⚙️ **Settings:**\nClick to update specific fields.", reply_markup=InlineKeyboardMarkup(kb), parse_mode='Markdown'); return
-
+        kb = [[InlineKeyboardButton("Lang", callback_data="set_lang_English"), InlineKeyboardButton("Mood", callback_data="set_mood_Neutral")], [InlineKeyboardButton("Close", callback_data="close_settings")]]
+        await update.message.reply_text("⚙️ Settings:", reply_markup=InlineKeyboardMarkup(kb)); return
     if text == "🪪 My ID": await show_profile(update, context); return
-    if text == "🆘 Help": await update.message.reply_text("🆘 **HELP**\n🚀 Start: Match\n🛑 Stop: End\n🎮 Games: Play", parse_mode='Markdown'); return
+    if text == "🆘 Help": await help_command(update, context); return
     
     if text == "🎮 Games":
         kb = [[InlineKeyboardButton("😈 Truth or Dare", callback_data="game_offer_Truth or Dare")],
               [InlineKeyboardButton("🎲 Would You Rather", callback_data="game_offer_Would You Rather")],
               [InlineKeyboardButton("✂️ Rock Paper Scissors", callback_data="game_offer_Rock Paper Scissors")]]
-        await update.message.reply_text("🎮 **Game Center**\nSelect a game to offer:", reply_markup=InlineKeyboardMarkup(kb), parse_mode='Markdown'); return
+        await update.message.reply_text("🎮 **Game Center**", reply_markup=InlineKeyboardMarkup(kb), parse_mode='Markdown'); return
     
     if text == "🛑 Stop Game":
         pid = ACTIVE_CHATS.get(user_id)
@@ -345,66 +342,18 @@ async def handle_text_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # Commands
     if text.startswith("/"):
-        # (Insert Admin/Help handlers here if needed via text, but buttons cover most)
         if text == "/stop": await stop_chat(update, context); return
-        pass
+        if text == "/admin": await admin_panel(update, context); return
+        if text.startswith("/ban"): await admin_ban_command(update, context); return
+        if text.startswith("/warn"): await admin_warn_command(update, context); return
+        if text.startswith("/broadcast"): await admin_broadcast_execute(update, context); return
+        if text.startswith("/feedback"): await handle_feedback_command(update, context); return
 
     await relay_message(update, context)
 
-async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    q = update.callback_query
-    await q.answer()
-    data = q.data
-    uid = q.from_user.id
-
-    if data == "force_random": await perform_match(update, context, uid); return
-    if data == "close_settings": await q.delete_message(); return
-    
-    # GAME LOGIC HANDLERS
-    if data.startswith("game_offer_"):
-        await offer_game(update, context, uid, data.split("_", 2)[2]); return
-    if data.startswith("game_accept_"):
-        game = data.split("_", 2)[2]; pid = ACTIVE_CHATS.get(uid)
-        if pid: await start_game_session(update, context, game, pid, uid)
-        return
-    if data == "game_reject":
-        pid = ACTIVE_CHATS.get(uid)
-        if pid: await context.bot.send_message(pid, "❌ **Partner declined.**", parse_mode='Markdown')
-        await q.edit_message_text("❌ Declined."); return
-        
-    if data.startswith("tod_pick_"): await send_tod_options(update, context, data.split("_")[2]); return
-    if data.startswith("tod_send_"): 
-        gd = GAME_STATES.get(uid)
-        if gd:
-            q_text = gd["options"][int(data.split("_")[2])]
-            pid = gd["partner"]
-            await context.bot.send_message(pid, f"🎲 **QUESTION:**\n{q_text}", parse_mode='Markdown')
-            await q.edit_message_text(f"✅ Sent: {q_text}")
-            GAME_STATES[uid]["turn"] = pid; GAME_STATES[pid]["turn"] = pid
-            await send_tod_turn(context, pid)
-        return
-    if data == "tod_manual": context.user_data["state"] = "GAME_MANUAL"; await q.edit_message_text("✍️ **Type your question now:**"); return
-
-    # Onboarding
-    if data.startswith("set_gen_"): await update_user_profile(uid, "gender", data.split("_")[2]); await send_onboarding_step(update, 2); return
-    if data.startswith("set_age_"): await update_user_profile(uid, "age_range", data.split("_")[2]); await send_onboarding_step(update, 3); return
-    if data.startswith("set_lang_"): await update_user_profile(uid, "language", data.split("_")[2]); await send_onboarding_step(update, 4); return
-    if data.startswith("set_reg_"): await update_user_profile(uid, "region", data.split("_")[2]); await send_onboarding_step(update, 5); return
-    if data.startswith("set_mood_"): await update_user_profile(uid, "mood", data.split("_")[2]); context.user_data["state"] = "ONBOARDING_INTEREST"; await send_onboarding_step(update, 6); return
-    if data == "onboarding_done": context.user_data["state"] = None; await show_main_menu(update); return
-    if data == "restart_onboarding": await send_onboarding_step(update, 1); return
-
-    # General
-    if data == "action_search": await start_search(update, context); return
-    if data == "main_menu": await show_main_menu(update); return
-    if data == "stop_search": await stop_search_process(update, context); return
-
-    # (Admin handlers omitted for brevity but logic is identical to Phase 14 - Add here if needed)
-    # IMPORTANT: Ensure Admin Logic is pasted here if you want Admin buttons to work via callback.
-    # I will rely on the fact that you have the Phase 14 Admin Logic. 
-    # IF YOU WANT THE FULL ADMIN LOGIC REPEATED HERE, SAY "ADD ADMIN". 
-    # Otherwise, this block handles the NEW GAME FEATURES + ONBOARDING + UI.
-
+# ==============================================================================
+# 🔌 CONNECTION LOGIC
+# ==============================================================================
 async def start_search(update, context):
     user_id = update.effective_user.id
     if user_id in ACTIVE_CHATS: await update.message.reply_text("⛔ **Already in chat!**", parse_mode='Markdown'); return
@@ -449,6 +398,7 @@ async def stop_chat(update, context, is_next=False):
     user_id = update.effective_user.id
     partner_id = ACTIVE_CHATS.pop(user_id, 0)
     if partner_id and partner_id in ACTIVE_CHATS: del ACTIVE_CHATS[partner_id]
+    
     if user_id in GAME_STATES: del GAME_STATES[user_id]
     if partner_id in GAME_STATES: del GAME_STATES[partner_id]
 
@@ -456,17 +406,17 @@ async def stop_chat(update, context, is_next=False):
     cur.execute("UPDATE users SET status='idle', partner_id=0 WHERE user_id IN (%s, %s)", (user_id, partner_id))
     conn.commit(); cur.close(); release_conn(conn)
     
-    k_me = [[InlineKeyboardButton("👍", callback_data=f"rate_like_{partner_id}"), InlineKeyboardButton("👎", callback_data=f"rate_dislike_{partner_id}")],
-            [InlineKeyboardButton("⚠️ Report User", callback_data=f"rate_report_{partner_id}")],
-            [InlineKeyboardButton("🚀 Find New Match", callback_data="action_search"), InlineKeyboardButton("🏠 Main Menu", callback_data="main_menu")]]
+    k = [[InlineKeyboardButton("👍", callback_data=f"rate_like_{partner_id}"), InlineKeyboardButton("👎", callback_data=f"rate_dislike_{partner_id}")],
+         [InlineKeyboardButton("⚠️ Report", callback_data=f"rate_report_{partner_id}")],
+         [InlineKeyboardButton("🚀 New Match", callback_data="action_search"), InlineKeyboardButton("🏠 Menu", callback_data="main_menu")]]
     
     if is_next:
         await update.message.reply_text("⏭️ **Skipping...**", reply_markup=ReplyKeyboardRemove(), parse_mode='Markdown')
-        await update.message.reply_text("📊 Feedback?", reply_markup=InlineKeyboardMarkup(k_me))
+        await update.message.reply_text("📊 Feedback?", reply_markup=InlineKeyboardMarkup(k))
         await start_search(update, context)
     else:
         await update.message.reply_text("🔌 **Disconnected.**", reply_markup=get_keyboard_lobby(), parse_mode='Markdown')
-        await update.message.reply_text("📊 Feedback?", reply_markup=InlineKeyboardMarkup(k_me))
+        await update.message.reply_text("📊 Feedback?", reply_markup=InlineKeyboardMarkup(k))
 
     if partner_id:
         try: await context.bot.send_message(partner_id, "🔌 **Partner Disconnected.**", reply_markup=get_keyboard_lobby(), parse_mode='Markdown')
@@ -475,11 +425,13 @@ async def stop_chat(update, context, is_next=False):
 async def relay_message(update, context):
     user_id = update.effective_user.id
     partner_id = ACTIVE_CHATS.get(user_id)
-    if not partner_id:
+    
+    if not partner_id: # Fallback
         conn = get_conn(); cur = conn.cursor()
         cur.execute("SELECT partner_id FROM users WHERE user_id = %s AND status='chatting'", (user_id,))
         row = cur.fetchone(); cur.close(); release_conn(conn)
         if row and row[0]: partner_id = row[0]; ACTIVE_CHATS[user_id] = partner_id
+
     if partner_id:
         if update.message.text:
             conn = get_conn(); cur = conn.cursor()
@@ -488,30 +440,126 @@ async def relay_message(update, context):
         try: await update.message.copy(chat_id=partner_id)
         except: await stop_chat(update, context)
 
-# ... (Include Admin Command Handlers Here - Ban, Warn, Broadcast, Feedback) ...
-# Note: Ensure `admin_ban_command`, `admin_warn_command`, `admin_broadcast_execute`, `handle_feedback_command` 
-# are pasted here from Part 3 of the previous successful build if not explicitly re-written above.
-# For safety, I'll re-include the minimal Feedback handler since it's crucial for Phase 15.
+async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    q = update.callback_query; await q.answer(); data = q.data; uid = q.from_user.id
 
-async def handle_feedback_command(update, context):
-    uid = update.effective_user.id; text = update.message.text.replace("/feedback", "").strip()
-    if not text: await update.message.reply_text("Usage: `/feedback msg`", parse_mode='Markdown'); return
-    conn = get_conn(); cur = conn.cursor()
-    cur.execute("INSERT INTO feedback (user_id, message) VALUES (%s, %s)", (uid, text))
-    conn.commit(); cur.close(); release_conn(conn)
-    await update.message.reply_text("✅ Sent.")
+    if data == "force_random": await perform_match(update, context, uid); return
+    if data == "close_settings": await q.delete_message(); return
+    
+    # GAME LOGIC
+    if data.startswith("game_offer_"): await offer_game(update, context, uid, data.split("_", 2)[2]); return
+    if data.startswith("game_accept_"): pid = ACTIVE_CHATS.get(uid); await start_game_session(update, context, data.split("_", 2)[2], pid, uid) if pid else None; return
+    if data == "game_reject": pid = ACTIVE_CHATS.get(uid); await context.bot.send_message(pid, "❌ Declined.") if pid else None; await q.edit_message_text("❌ Declined."); return
+    if data.startswith("tod_pick_"): await send_tod_options(update, context, data.split("_")[2]); return
+    if data.startswith("tod_send_"): 
+        gd = GAME_STATES.get(uid)
+        if gd:
+            q_text = gd["options"][int(data.split("_")[2])]
+            pid = gd["partner"]
+            await context.bot.send_message(pid, f"🎲 **QUESTION:**\n{q_text}", parse_mode='Markdown')
+            await q.edit_message_text(f"✅ Sent: {q_text}")
+            GAME_STATES[uid]["turn"] = pid; GAME_STATES[pid]["turn"] = pid
+            await send_tod_turn(context, pid)
+        return
+    if data == "tod_manual": context.user_data["state"] = "GAME_MANUAL"; await q.edit_message_text("✍️ **Type your question now:**"); return
+
+    # Onboarding
+    if data.startswith("set_gen_"): await update_user_profile(uid, "gender", data.split("_")[2]); await send_onboarding_step(update, 2); return
+    if data.startswith("set_age_"): await update_user_profile(uid, "age_range", data.split("_")[2]); await send_onboarding_step(update, 3); return
+    if data.startswith("set_lang_"): await update_user_profile(uid, "language", data.split("_")[2]); await send_onboarding_step(update, 4); return
+    if data.startswith("set_reg_"): await update_user_profile(uid, "region", data.split("_")[2]); await send_onboarding_step(update, 5); return
+    if data.startswith("set_mood_"): await update_user_profile(uid, "mood", data.split("_")[2]); context.user_data["state"] = "ONBOARDING_INTEREST"; await send_onboarding_step(update, 6); return
+    if data == "onboarding_done": context.user_data["state"] = None; await show_main_menu(update); return
+    if data == "restart_onboarding": await send_onboarding_step(update, 1); return
+
+    # Admin Logic
+    if data == "admin_broadcast_info" and uid in ADMIN_IDS:
+        try: await q.edit_message_text("📢 **Broadcast:**\nType `/broadcast Msg`", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙", callback_data="admin_home")]]), parse_mode='Markdown'); return
+        except error.BadRequest: pass
+
+    if data == "admin_users" and uid in ADMIN_IDS:
+        conn = get_conn(); cur = conn.cursor(); cur.execute("SELECT user_id, first_name FROM users ORDER BY joined_at DESC LIMIT 10"); users = cur.fetchall(); cur.close(); release_conn(conn)
+        msg = "📜 **Recent:**\n" + "\n".join([f"• {u[1]} (`{u[0]}`)" for u in users])
+        try: await q.edit_message_text(msg, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙", callback_data="admin_home")]]), parse_mode='Markdown'); return
+        except error.BadRequest: pass
+
+    if data == "admin_reports" and uid in ADMIN_IDS:
+        conn = get_conn(); cur = conn.cursor(); cur.execute("SELECT user_id, report_count FROM users WHERE report_count > 0 ORDER BY report_count DESC LIMIT 5"); users = cur.fetchall(); cur.close(); release_conn(conn)
+        if not users: 
+            try: await q.edit_message_text("✅ No reports.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙", callback_data="admin_home")]])); return
+            except error.BadRequest: pass
+        kb = []; 
+        for u in users: kb.append([InlineKeyboardButton(f"🔨 {u[0]}", callback_data=f"ban_user_{u[0]}"), InlineKeyboardButton(f"✅ {u[0]}", callback_data=f"clear_user_{u[0]}")])
+        kb.append([InlineKeyboardButton("🔙", callback_data="admin_home")])
+        try: await q.edit_message_text("⚠️ **Flagged:**", reply_markup=InlineKeyboardMarkup(kb), parse_mode='Markdown'); return
+        except error.BadRequest: pass
+
+    if data == "admin_banlist" and uid in ADMIN_IDS:
+        conn = get_conn(); cur = conn.cursor(); cur.execute("SELECT user_id, banned_until FROM users WHERE banned_until > NOW() LIMIT 5"); users = cur.fetchall(); cur.close(); release_conn(conn)
+        if not users:
+            try: await q.edit_message_text("✅ No bans.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙", callback_data="admin_home")]])); return
+            except error.BadRequest: pass
+        kb = []; 
+        for u in users: kb.append([InlineKeyboardButton(f"✅ Unban {u[0]}", callback_data=f"unban_user_{u[0]}")])
+        kb.append([InlineKeyboardButton("🔙", callback_data="admin_home")])
+        try: await q.edit_message_text("🚫 **Bans:**", reply_markup=InlineKeyboardMarkup(kb), parse_mode='Markdown'); return
+        except error.BadRequest: pass
+
+    if data == "admin_feedbacks" and uid in ADMIN_IDS:
+        conn = get_conn(); cur = conn.cursor(); cur.execute("SELECT message FROM feedback ORDER BY timestamp DESC LIMIT 5"); rows = cur.fetchall(); cur.close(); release_conn(conn)
+        txt = "\n".join([r[0] for r in rows]) or "None"
+        try: await q.edit_message_text(f"📨 **Feed:**\n{txt}", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙", callback_data="admin_home")]]), parse_mode='Markdown'); return
+        except error.BadRequest: pass
+
+    if data == "admin_home" and uid in ADMIN_IDS: await admin_panel(update, context); return
+
+    if data.startswith("ban_user_") and uid in ADMIN_IDS: await admin_ban_command(update, context); return
+    if data.startswith("clear_user_") and uid in ADMIN_IDS:
+        tid = int(data.split("_")[2]); conn = get_conn(); cur = conn.cursor(); cur.execute("UPDATE users SET report_count = 0 WHERE user_id = %s", (tid,)); conn.commit(); cur.close(); release_conn(conn)
+        try: await q.edit_message_text(f"✅ Cleared {tid}.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙", callback_data="admin_reports")]]), parse_mode='Markdown'); return
+        except error.BadRequest: pass
+
+    if data.startswith("unban_user_") and uid in ADMIN_IDS:
+        tid = int(data.split("_")[2]); conn = get_conn(); cur = conn.cursor(); cur.execute("UPDATE users SET banned_until = NULL WHERE user_id = %s", (tid,)); conn.commit(); cur.close(); release_conn(conn)
+        try: await q.edit_message_text(f"✅ Unbanned {tid}.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙", callback_data="admin_banlist")]]), parse_mode='Markdown'); return
+        except error.BadRequest: pass
+
+    # Rate Logic
+    if data.startswith("rate_"):
+        act, target = data.split("_")[1], int(data.split("_")[2])
+        if act == "report":
+            await handle_report(update, context, uid, target)
+            try: await q.edit_message_text("⚠️ Reported.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🚫 Block", callback_data=f"rate_dislike_{target}")]]))
+            except error.BadRequest: pass
+        else:
+            sc = 1 if act == "like" else -1
+            conn = get_conn(); cur = conn.cursor(); cur.execute("INSERT INTO user_interactions (rater_id, target_id, score) VALUES (%s, %s, %s)", (uid, target, sc)); conn.commit(); cur.close(); release_conn(conn)
+            try: await q.edit_message_text("✅ Sent.")
+            except error.BadRequest: pass
+            
+    if data == "action_search": await start_search(update, context); return
+    if data == "main_menu": await show_main_menu(update); return
+    if data == "stop_search": await stop_search_process(update, context); return
 
 if __name__ == '__main__':
-    init_db()
-    flask_thread = threading.Thread(target=run_flask); flask_thread.daemon = True; flask_thread.start()
-    req = HTTPXRequest(connect_timeout=60, read_timeout=60)
-    app = ApplicationBuilder().token(BOT_TOKEN).job_queue(None).request(req).build()
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("help", help_command))
-    app.add_handler(CommandHandler("feedback", handle_feedback_command))
-    # Add Admin Handlers Here...
-    app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_text_input))
-    app.add_handler(CallbackQueryHandler(button_handler))
-    app.add_handler(MessageHandler(filters.ALL, relay_message))
-    print("🤖 PHASE 15 FULL BOT LIVE")
-    app.run_polling()
+    if not BOT_TOKEN: print("ERROR: Config missing")
+    else:
+        init_db()
+        flask_thread = threading.Thread(target=run_flask); flask_thread.daemon = True; flask_thread.start()
+        req = HTTPXRequest(connect_timeout=60, read_timeout=60)
+        app = ApplicationBuilder().token(BOT_TOKEN).job_queue(None).request(req).build()
+        
+        app.add_handler(CommandHandler("start", start))
+        app.add_handler(CommandHandler("admin", admin_panel))
+        app.add_handler(CommandHandler("ban", admin_ban_command))
+        app.add_handler(CommandHandler("warn", admin_warn_command))
+        app.add_handler(CommandHandler("broadcast", admin_broadcast_execute))
+        app.add_handler(CommandHandler("help", help_command))
+        app.add_handler(CommandHandler("feedback", handle_feedback_command))
+        
+        app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_text_input))
+        app.add_handler(CallbackQueryHandler(button_handler))
+        app.add_handler(MessageHandler(filters.ALL, relay_message))
+        
+        print("🤖 PHASE 15 FIXED BOT LIVE")
+        app.run_polling()
