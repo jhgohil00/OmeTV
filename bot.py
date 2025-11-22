@@ -273,17 +273,27 @@ async def send_tod_turn(context, turn_id):
     kb = [[InlineKeyboardButton("🟢 Truth", callback_data="tod_pick_truth"), InlineKeyboardButton("🔴 Dare", callback_data="tod_pick_dare")]]
     await context.bot.send_message(turn_id, "🫵 **Your Turn!** Choose:", reply_markup=InlineKeyboardMarkup(kb), parse_mode='Markdown')
 
-async def send_tod_options(context, target_id, mode):
-    # target_id = The person who needs to ASK the question
+async def send_tod_options(update, context, mode):
+    user = update.effective_user
+    # Pick 5 random options
     options = random.sample(GAME_DATA[f"tod_{mode}"], 5)
-    kb = [[InlineKeyboardButton(opt[:30]+"...", callback_data=f"tod_send_{i}")] for i, opt in enumerate(options)]
-    kb.append([InlineKeyboardButton("✍️ Ask Yourself (Type)", callback_data="tod_manual")])
     
-    # Store options for the asker
-    if target_id in GAME_STATES:
-        GAME_STATES[target_id]["options"] = options
+    # Save to state so we know what "1" or "2" means later
+    GAME_STATES[user.id]["options"] = options
+    
+    # Build the Menu Text (The List)
+    msg_text = f"🎭 **Pick a {mode.upper()}:**\n\n"
+    for i, opt in enumerate(options):
+        msg_text += f"**{i+1}.** {opt}\n"
         
-    await context.bot.send_message(target_id, f"🎭 **Partner chose {mode.upper()}!**\nPick a question to ask them:", reply_markup=InlineKeyboardMarkup(kb), parse_mode='Markdown')
+    # Build Numbered Buttons
+    kb = [
+        [InlineKeyboardButton("1️⃣", callback_data="tod_send_0"), InlineKeyboardButton("2️⃣", callback_data="tod_send_1"), InlineKeyboardButton("3️⃣", callback_data="tod_send_2")],
+        [InlineKeyboardButton("4️⃣", callback_data="tod_send_3"), InlineKeyboardButton("5️⃣", callback_data="tod_send_4")],
+        [InlineKeyboardButton("✍️ Ask Your Own", callback_data="tod_manual")]
+    ]
+    
+    await update.callback_query.edit_message_text(msg_text, reply_markup=InlineKeyboardMarkup(kb), parse_mode='Markdown')
 async def send_wyr_round(context, p1, p2):
     q = random.choice(GAME_DATA["wyr"])
     kb = [[InlineKeyboardButton(f"🅰️ {q[0]}", callback_data="wyr_a"), InlineKeyboardButton(f"🅱️ {q[1]}", callback_data="wyr_b")]]
