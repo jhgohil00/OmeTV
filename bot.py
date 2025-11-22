@@ -22,15 +22,12 @@ from telegram.request import HTTPXRequest
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 DATABASE_URL = os.getenv("DATABASE_URL")
 admin_env = os.getenv("ADMIN_IDS", "")
-# Parse Admin IDs safely
-ADMIN_IDS = []
-if admin_env:
-    ADMIN_IDS = [int(x) for x in admin_env.split(",") if x.strip().isdigit()]
+ADMIN_IDS = [int(x) for x in admin_env.split(",") if x.strip().isdigit()]
 
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 
 # ==============================================================================
-# ❤️ THE HEARTBEAT (Prevent Render from sleeping)
+# ❤️ THE HEARTBEAT
 # ==============================================================================
 app_flask = Flask(__name__)
 
@@ -55,7 +52,7 @@ def init_db():
     if not conn: return
     cur = conn.cursor()
     
-    # 1. Users Table
+    # 1. Users
     cur.execute("""
         CREATE TABLE IF NOT EXISTS users (
             user_id BIGINT PRIMARY KEY,
@@ -75,7 +72,7 @@ def init_db():
             joined_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
     """)
-    # 2. Chat Logs
+    # 2. Logs
     cur.execute("""
         CREATE TABLE IF NOT EXISTS chat_logs (
             id SERIAL PRIMARY KEY,
@@ -95,7 +92,7 @@ def init_db():
             timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
     """)
-    # 4. Interactions (Likes/Dislikes)
+    # 4. Interactions
     cur.execute("""
         CREATE TABLE IF NOT EXISTS user_interactions (
             id SERIAL PRIMARY KEY,
@@ -105,7 +102,7 @@ def init_db():
             timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
     """)
-    # 5. Feedback (NEW FEATURE)
+    # 5. Feedback
     cur.execute("""
         CREATE TABLE IF NOT EXISTS feedback (
             id SERIAL PRIMARY KEY,
@@ -115,15 +112,13 @@ def init_db():
         );
     """)
     
-    # Auto-Migration for older DB versions
+    # Migration
     try:
-        cur.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS username TEXT;")
-        cur.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS first_name TEXT;")
-        cur.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS report_count INTEGER DEFAULT 0;")
-        cur.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS banned_until TIMESTAMP;")
-        cur.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS gender TEXT DEFAULT 'Hidden';")
-        cur.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS age_range TEXT DEFAULT 'Hidden';")
-        cur.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS region TEXT DEFAULT 'Hidden';")
+        cols = ["username TEXT", "first_name TEXT", "report_count INTEGER DEFAULT 0", 
+                "banned_until TIMESTAMP", "gender TEXT DEFAULT 'Hidden'", 
+                "age_range TEXT DEFAULT 'Hidden'", "region TEXT DEFAULT 'Hidden'"]
+        for c in cols:
+            cur.execute(f"ALTER TABLE users ADD COLUMN IF NOT EXISTS {c};")
     except: pass
 
     conn.commit()
@@ -132,13 +127,18 @@ def init_db():
     print("✅ DATABASE READY.")
 
 # ==============================================================================
-# ⌨️ KEYBOARD LAYOUTS
+# ⌨️ KEYBOARD LAYOUTS (Fixed States)
 # ==============================================================================
 def get_keyboard_lobby():
     return ReplyKeyboardMarkup([
         [KeyboardButton("🚀 Start Matching")],
         [KeyboardButton("🎯 Change Interests"), KeyboardButton("⚙️ Settings")],
         [KeyboardButton("🪪 My ID"), KeyboardButton("🆘 Help")]
+    ], resize_keyboard=True)
+
+def get_keyboard_searching():
+    return ReplyKeyboardMarkup([
+        [KeyboardButton("❌ Stop Searching")]
     ], resize_keyboard=True)
 
 def get_keyboard_chat():
@@ -153,24 +153,21 @@ def get_keyboard_game():
     ], resize_keyboard=True)
 
 # ==============================================================================
-# 🧠 MATCHMAKING ENGINE (70-Point System)
+# 🧠 MATCHMAKING ENGINE
 # ==============================================================================
 def find_match(user_id):
     conn = get_db_connection()
     cur = conn.cursor()
     
-    # Get User Profile
     cur.execute("SELECT language, interests, age_range FROM users WHERE user_id = %s", (user_id,))
     me = cur.fetchone()
     if not me: return None, []
     my_lang, my_interests, my_age = me[0], me[1], me[2]
     my_tags = [t.strip().lower() for t in my_interests.split(',')] if my_interests else []
 
-    # Get Disliked List
     cur.execute("SELECT target_id FROM user_interactions WHERE rater_id = %s AND score = -1", (user_id,))
     disliked_ids = {row[0] for row in cur.fetchall()}
 
-    # Find Candidates
     cur.execute("""
         SELECT user_id, language, interests, age_range 
         FROM users 
@@ -187,9 +184,8 @@ def find_match(user_id):
         cand_tags = [t.strip().lower() for t in cand_interests.split(',')] if cand_interests else []
         
         score = 0
-        if cand_id in disliked_ids: score -= 1000 # Soft Demotion
+        if cand_id in disliked_ids: score -= 1000
         
-        # Logic: Interest (40) > Language (20) > Age (10)
         matched_tags = list(set(my_tags) & set(cand_tags))
         if matched_tags: score += 40
         if cand_lang == my_lang: score += 20
@@ -202,12 +198,13 @@ def find_match(user_id):
     return best_match, common_interests
 
 # ==============================================================================
-# 👮 ADMIN COMMANDS
+# 👮 ADMIN SYSTEM (Fixed Buttons & Stats)
 # ==============================================================================
 async def admin_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id not in ADMIN_IDS: return
     conn = get_db_connection()
     cur = conn.cursor()
+    
     cur.execute("SELECT COUNT(*) FROM users")
     total = cur.fetchone()[0]
     cur.execute("SELECT COUNT(*) FROM users WHERE status != 'idle'")
@@ -215,13 +212,18 @@ async def admin_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     cur.execute("SELECT COUNT(*) FROM users WHERE report_count > 0")
     flagged = cur.fetchone()[0]
     
-    # Geo Stats
+    # Gender Stats
+    cur.execute("SELECT gender, COUNT(*) FROM users GROUP BY gender")
+    g_rows = cur.fetchall()
+    g_stats = " | ".join([f"{r[0]}:{r[1]}" for r in g_rows])
+
     def get_stat(col):
         cur.execute(f"SELECT {col}, COUNT(*) FROM users GROUP BY {col} ORDER BY COUNT(*) DESC LIMIT 3")
         return " | ".join([f"{r[0]}:{r[1]}" for r in cur.fetchall()])
 
     msg = (f"👮 **CONTROL ROOM**\n👥 Total: `{total}` | 🟢 Online: `{online}`\n⚠️ Flagged: `{flagged}`\n\n"
-           f"🌍 {get_stat('region')}\n🗣️ {get_stat('language')}")
+           f"🚻 **Gender:** {g_stats}\n"
+           f"🌍 **Geo:** {get_stat('region')}\n🗣️ **Lang:** {get_stat('language')}")
     
     kb = [
         [InlineKeyboardButton("📢 Broadcast", callback_data="admin_broadcast"), InlineKeyboardButton("📜 Recent Users", callback_data="admin_users")],
@@ -275,23 +277,19 @@ async def admin_broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def handle_user_feedback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
-    # Get feedback text (remove /feedback command)
     feedback_text = update.message.text.replace("/feedback", "").strip()
     
     if not feedback_text:
-        await update.message.reply_text("❌ **Error:** Please type your message.\nExample: `/feedback I love this bot!`", parse_mode='Markdown')
-        return
+        await update.message.reply_text("❌ Type message: `/feedback Hello`", parse_mode='Markdown'); return
 
-    conn = get_db_connection()
-    cur = conn.cursor()
+    conn = get_db_connection(); cur = conn.cursor()
     cur.execute("INSERT INTO feedback (user_id, message) VALUES (%s, %s)", (user_id, feedback_text))
-    conn.commit()
-    conn.close()
+    conn.commit(); conn.close()
     
-    await update.message.reply_text("✅ **Feedback Sent!**\nAdmins will review it.", parse_mode='Markdown')
+    await update.message.reply_text("✅ **Feedback Sent!**", parse_mode='Markdown')
 
 # ==============================================================================
-# 📝 ONBOARDING (The 6-Step Vibe Check)
+# 📝 ONBOARDING (Updated Options)
 # ==============================================================================
 async def send_onboarding_step(update, step):
     kb = []
@@ -299,41 +297,31 @@ async def send_onboarding_step(update, step):
     
     if step == 1:
         msg = "1️⃣ **What's your gender?**"
-        kb = [
-            [InlineKeyboardButton("👨 Male", callback_data="set_gen_Male"), InlineKeyboardButton("👩 Female", callback_data="set_gen_Female")], 
-            [InlineKeyboardButton("🌈 Other", callback_data="set_gen_Other"), InlineKeyboardButton("⏭️ Skip", callback_data="set_gen_Hidden")]
-        ]
+        kb = [[InlineKeyboardButton("👨 Male", callback_data="set_gen_Male"), InlineKeyboardButton("👩 Female", callback_data="set_gen_Female")], 
+              [InlineKeyboardButton("🌈 Other", callback_data="set_gen_Other"), InlineKeyboardButton("⏭️ Skip", callback_data="set_gen_Hidden")]]
     elif step == 2:
         msg = "2️⃣ **Age Group?**"
-        kb = [
-            [InlineKeyboardButton("🐣 ~18", callback_data="set_age_~18"), InlineKeyboardButton("🧢 20-25", callback_data="set_age_20-25")], 
-            [InlineKeyboardButton("💼 25-30", callback_data="set_age_25-30"), InlineKeyboardButton("☕ 30-35", callback_data="set_age_30-35")],
-            [InlineKeyboardButton("🍷 40+", callback_data="set_age_40+"), InlineKeyboardButton("⏭️ Skip", callback_data="set_age_Hidden")]
-        ]
+        kb = [[InlineKeyboardButton("🐣 ~18", callback_data="set_age_~18"), InlineKeyboardButton("🧢 20-25", callback_data="set_age_20-25")], 
+              [InlineKeyboardButton("💼 25-30", callback_data="set_age_25-30"), InlineKeyboardButton("☕ 30+", callback_data="set_age_30+")],
+              [InlineKeyboardButton("⏭️ Skip", callback_data="set_age_Hidden")]]
     elif step == 3:
         msg = "3️⃣ **Primary Language?**"
-        kb = [
-            [InlineKeyboardButton("🇺🇸 English", callback_data="set_lang_English"), InlineKeyboardButton("🇮🇳 Hindi", callback_data="set_lang_Hindi")],
-            [InlineKeyboardButton("🇮🇩 Indo", callback_data="set_lang_Indo"), InlineKeyboardButton("🇪🇸 Spanish", callback_data="set_lang_Spanish")],
-            [InlineKeyboardButton("🇫🇷 French", callback_data="set_lang_French"), InlineKeyboardButton("🇯🇵 Japanese", callback_data="set_lang_Japanese")],
-            [InlineKeyboardButton("🌍 Other", callback_data="set_lang_Other"), InlineKeyboardButton("⏭️ Skip", callback_data="set_lang_English")]
-        ]
+        kb = [[InlineKeyboardButton("🇺🇸 English", callback_data="set_lang_English"), InlineKeyboardButton("🇮🇳 Hindi", callback_data="set_lang_Hindi")],
+              [InlineKeyboardButton("🇮🇩 Indo", callback_data="set_lang_Indo"), InlineKeyboardButton("🇪🇸 Spanish", callback_data="set_lang_Spanish")],
+              [InlineKeyboardButton("🇫🇷 French", callback_data="set_lang_French"), InlineKeyboardButton("🇯🇵 Japanese", callback_data="set_lang_Japanese")],
+              [InlineKeyboardButton("🌍 Other", callback_data="set_lang_Other"), InlineKeyboardButton("⏭️ Skip", callback_data="set_lang_English")]]
     elif step == 4:
         msg = "4️⃣ **Region?**"
-        kb = [
-            [InlineKeyboardButton("🌏 Asia", callback_data="set_reg_Asia"), InlineKeyboardButton("🌍 Europe", callback_data="set_reg_Europe")],
-            [InlineKeyboardButton("🌎 America", callback_data="set_reg_America"), InlineKeyboardButton("🌍 Africa", callback_data="set_reg_Africa")],
-            [InlineKeyboardButton("⏭️ Skip", callback_data="set_reg_Hidden")]
-        ]
+        kb = [[InlineKeyboardButton("🌏 Asia", callback_data="set_reg_Asia"), InlineKeyboardButton("🌍 Europe", callback_data="set_reg_Europe")],
+              [InlineKeyboardButton("🌎 America", callback_data="set_reg_America"), InlineKeyboardButton("🌍 Africa", callback_data="set_reg_Africa")],
+              [InlineKeyboardButton("⏭️ Skip", callback_data="set_reg_Hidden")]]
     elif step == 5:
         msg = "5️⃣ **Current Mood?**"
-        kb = [
-            [InlineKeyboardButton("😃 Happy", callback_data="set_mood_Happy"), InlineKeyboardButton("😔 Sad", callback_data="set_mood_Sad")],
-            [InlineKeyboardButton("😴 Bored", callback_data="set_mood_Bored"), InlineKeyboardButton("🤔 Don't Know", callback_data="set_mood_Confused")],
-            [InlineKeyboardButton("🥀 Lonely", callback_data="set_mood_Lonely"), InlineKeyboardButton("⏭️ Skip", callback_data="set_mood_Neutral")]
-        ]
+        kb = [[InlineKeyboardButton("😃 Happy", callback_data="set_mood_Happy"), InlineKeyboardButton("😔 Sad", callback_data="set_mood_Sad")],
+              [InlineKeyboardButton("😴 Bored", callback_data="set_mood_Bored"), InlineKeyboardButton("🤔 Don't Know", callback_data="set_mood_Confused")],
+              [InlineKeyboardButton("🥀 Lonely", callback_data="set_mood_Lonely"), InlineKeyboardButton("⏭️ Skip", callback_data="set_mood_Neutral")]]
     elif step == 6:
-        msg = "6️⃣ **Final Step! Interests**\n\nType keywords (e.g., *Music, Movies, Love*) or click Skip."
+        msg = "6️⃣ **Final Step! Interests**\n\nType keywords (e.g., *Cricket, Movies*) or click Skip."
         kb = [[InlineKeyboardButton("⏭️ Skip & Finish", callback_data="onboarding_done")]]
 
     try:
@@ -348,14 +336,12 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     conn = get_db_connection(); cur = conn.cursor()
     
-    # Ban Check
     cur.execute("SELECT banned_until, gender FROM users WHERE user_id = %s", (user.id,))
     data = cur.fetchone()
     if data and data[0] and data[0] > datetime.datetime.now():
         await update.message.reply_text(f"🚫 Banned until {data[0]}.")
         conn.close(); return
 
-    # Register
     cur.execute("""
         INSERT INTO users (user_id, username, first_name) VALUES (%s, %s, %s)
         ON CONFLICT (user_id) DO UPDATE SET username = %s, first_name = %s
@@ -386,7 +372,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "🛑 **Stop:** End chat & rate user.\n"
         "📨 **Feedback:** Type `/feedback Your Message` to contact admin.\n\n"
         "**Rules:**\n"
-        "1. No vulgarity (Instant Ban).\n"
+        "1. No 18+ content (Instant Ban).\n"
         "2. No selling/ads.\n"
         "3. Be respectful.\n\n"
         "*3 Reports = Auto-Flag for Admin Review.*"
@@ -412,6 +398,8 @@ async def handle_text_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if text == "🚀 Start Matching": await start_search(update, context); return
     if text in ["🛑 Stop", "🛑 Stop Chat"]: await stop_chat(update, context); return
     if text == "⏭️ Next": await stop_chat(update, context, is_next=True); return
+    if text == "❌ Stop Searching": await stop_search_process(update, context); return
+    
     if text == "🎯 Change Interests":
         context.user_data["state"] = "ONBOARDING_INTEREST"
         await update.message.reply_text("👇 **Type new interests:**", reply_markup=ReplyKeyboardRemove(), parse_mode='Markdown'); return
@@ -453,10 +441,17 @@ async def start_search(update, context):
     conn.commit(); conn.close()
     
     tags = row[1] if row[1] else "Any"
-    await update.message.reply_text(f"📡 **Scanning Frequencies...**\nLooking for: `{tags}`...", parse_mode='Markdown', reply_markup=ReplyKeyboardRemove())
+    await update.message.reply_text(f"📡 **Scanning Frequencies...**\nLooking for: `{tags}`...", parse_mode='Markdown', reply_markup=get_keyboard_searching())
     
     if context.job_queue: context.job_queue.run_once(send_reroll_option, 15, data=user_id)
     await perform_match(update, context, user_id)
+
+async def stop_search_process(update, context):
+    user_id = update.effective_user.id
+    conn = get_db_connection(); cur = conn.cursor()
+    cur.execute("UPDATE users SET status = 'idle' WHERE user_id = %s", (user_id,))
+    conn.commit(); conn.close()
+    await update.message.reply_text("🛑 Search Stopped.", reply_markup=get_keyboard_lobby())
 
 async def perform_match(update, context, user_id):
     partner_id, common = find_match(user_id)
@@ -495,6 +490,7 @@ async def stop_chat(update, context, is_next=False):
         [InlineKeyboardButton("⚠️ Report User", callback_data=f"rate_report_{partner}")],
         [InlineKeyboardButton("🚀 Find New Match", callback_data="action_search"), InlineKeyboardButton("🏠 Main Menu", callback_data="main_menu")]
     ]
+    # Partner sees Lobby options, NOT "Find New Match" immediately (to avoid loop issues)
     k_partner = [
         [InlineKeyboardButton("👍 Cool", callback_data=f"rate_like_{user_id}"), InlineKeyboardButton("👎 Lame", callback_data=f"rate_dislike_{user_id}")],
         [InlineKeyboardButton("⚠️ Report User", callback_data=f"rate_report_{user_id}")],
@@ -503,14 +499,17 @@ async def stop_chat(update, context, is_next=False):
 
     if is_next:
         await update.message.reply_text("⏭️ **Skipping...**", reply_markup=ReplyKeyboardRemove(), parse_mode='Markdown')
-        # Still send feedback options to the user skipping? Usually no, to be fast.
-        # But we MUST send disconnection msg to partner.
+        # Show feedback to skipper? Yes, but quickly.
+        await update.message.reply_text("📊 Feedback on last partner?", reply_markup=InlineKeyboardMarkup(k_me))
         await start_search(update, context)
     else:
-        await update.message.reply_text("🔌 **Connection Severed.**\n📊 **Experience Report:**", reply_markup=InlineKeyboardMarkup(k_me), parse_mode='Markdown')
+        await update.message.reply_text("🔌 **Connection Severed.**", reply_markup=get_keyboard_lobby(), parse_mode='Markdown')
+        await update.message.reply_text("📊 **Experience Report:**", reply_markup=InlineKeyboardMarkup(k_me), parse_mode='Markdown')
 
     if partner:
-        try: await context.bot.send_message(partner, "🔌 **Connection Severed.**\n📊 **Experience Report:**", reply_markup=InlineKeyboardMarkup(k_partner), parse_mode='Markdown')
+        try: 
+            await context.bot.send_message(partner, "🔌 **Partner Disconnected.**", reply_markup=get_keyboard_lobby(), parse_mode='Markdown')
+            await context.bot.send_message(partner, "📊 **Experience Report:**", reply_markup=InlineKeyboardMarkup(k_partner), parse_mode='Markdown')
         except: pass
 
 async def relay_message(update, context):
@@ -528,7 +527,7 @@ async def relay_message(update, context):
         except: await stop_chat(update, context)
 
 # ==============================================================================
-# 🧩 HELPERS
+# 🧩 HELPERS & BUTTON HANDLER
 # ==============================================================================
 async def send_reroll_option(context: ContextTypes.DEFAULT_TYPE):
     user_id = context.job.data
@@ -559,7 +558,7 @@ async def show_profile(update, context):
     await update.message.reply_text(text, parse_mode='Markdown')
 
 async def show_main_menu(update):
-    await update.message.reply_text("👋 **Welcome to OmeTV Chatbot... **", reply_markup=get_keyboard_lobby(), parse_mode='Markdown')
+    await update.message.reply_text("👋 **Lobby**", reply_markup=get_keyboard_lobby(), parse_mode='Markdown')
 
 async def handle_report(update, context, reporter, reported):
     conn = get_db_connection(); cur = conn.cursor()
@@ -603,8 +602,9 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # Admin Logic
     if data == "admin_broadcast" and uid in ADMIN_IDS: await admin_broadcast(update, context); return
-    if data == "admin_users" and uid in ADMIN_IDS: await admin_panel(update, context); return # Placeholder
-    if data == "admin_banlist" and uid in ADMIN_IDS: await admin_panel(update, context); return # Placeholder
+    if data == "admin_users" and uid in ADMIN_IDS: await admin_panel(update, context); return 
+    if data == "admin_banlist" and uid in ADMIN_IDS: await admin_panel(update, context); return 
+    if data == "admin_reports" and uid in ADMIN_IDS: await admin_panel(update, context); return
     
     if data == "admin_feedbacks" and uid in ADMIN_IDS:
         conn = get_db_connection(); cur = conn.cursor()
@@ -623,14 +623,14 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         conn = get_db_connection(); cur = conn.cursor()
         cur.execute("UPDATE users SET report_count = 0 WHERE user_id = %s", (tid,))
         conn.commit(); conn.close()
-        await q.edit_message_text(f"✅ Cleared reports for {tid}.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="admin_home")]])); return
+        await q.edit_message_text(f"✅ Cleared reports for {tid}.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="admin_reports")]]), parse_mode='Markdown'); return
 
     if data.startswith("unban_user_") and uid in ADMIN_IDS:
         tid = int(data.split("_")[2])
         conn = get_db_connection(); cur = conn.cursor()
         cur.execute("UPDATE users SET banned_until = NULL WHERE user_id = %s", (tid,))
         conn.commit(); conn.close()
-        await q.edit_message_text(f"✅ Unbanned {tid}.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="admin_home")]])); return
+        await q.edit_message_text(f"✅ Unbanned {tid}.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="admin_banlist")]]), parse_mode='Markdown'); return
 
     # Rate Logic
     if data.startswith("rate_"):
@@ -646,6 +646,11 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             cur.execute("UPDATE users SET karma_score = karma_score + %s WHERE user_id = %s", (10 if sc == 1 else -10, target))
             conn.commit(); conn.close()
             await q.edit_message_text("✅ Feedback Sent.")
+            
+    # General Search/Menu actions from Inline
+    if data == "action_search": await start_search(update, context); return
+    if data == "main_menu": await show_main_menu(update); return
+    if data == "stop_search": await stop_search_process(update, context); return
 
 if __name__ == '__main__':
     if not BOT_TOKEN: print("ERROR: Config missing")
@@ -666,5 +671,5 @@ if __name__ == '__main__':
         app.add_handler(CallbackQueryHandler(button_handler))
         app.add_handler(MessageHandler(filters.ALL, relay_message))
         
-        print("🤖 PHASE 10 BOT LIVE")
+        print("🤖 PHASE 11 BOT LIVE")
         app.run_polling()
