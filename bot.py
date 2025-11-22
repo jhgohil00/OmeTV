@@ -273,27 +273,28 @@ async def send_tod_turn(context, turn_id):
     kb = [[InlineKeyboardButton("🟢 Truth", callback_data="tod_pick_truth"), InlineKeyboardButton("🔴 Dare", callback_data="tod_pick_dare")]]
     await context.bot.send_message(turn_id, "🫵 **Your Turn!** Choose:", reply_markup=InlineKeyboardMarkup(kb), parse_mode='Markdown')
 
-async def send_tod_options(update, context, mode):
-    user = update.effective_user
-    # Pick 5 random options
+async def send_tod_options(context, target_id, mode):
+    # Select 5 random questions
     options = random.sample(GAME_DATA[f"tod_{mode}"], 5)
     
-    # Save to state so we know what "1" or "2" means later
-    GAME_STATES[user.id]["options"] = options
-    
-    # Build the Menu Text (The List)
+    # Create Menu Text
     msg_text = f"🎭 **Pick a {mode.upper()}:**\n\n"
     for i, opt in enumerate(options):
         msg_text += f"**{i+1}.** {opt}\n"
-        
-    # Build Numbered Buttons
+    
+    # Create Buttons (1-5 and Manual)
     kb = [
         [InlineKeyboardButton("1️⃣", callback_data="tod_send_0"), InlineKeyboardButton("2️⃣", callback_data="tod_send_1"), InlineKeyboardButton("3️⃣", callback_data="tod_send_2")],
         [InlineKeyboardButton("4️⃣", callback_data="tod_send_3"), InlineKeyboardButton("5️⃣", callback_data="tod_send_4")],
         [InlineKeyboardButton("✍️ Ask Your Own", callback_data="tod_manual")]
     ]
     
-    await update.callback_query.edit_message_text(msg_text, reply_markup=InlineKeyboardMarkup(kb), parse_mode='Markdown')
+    # Save options to the Asker's state (target_id)
+    if target_id not in GAME_STATES: GAME_STATES[target_id] = {}
+    GAME_STATES[target_id]["options"] = options
+        
+    # Send to the Partner (Asker)
+    await context.bot.send_message(target_id, msg_text, reply_markup=InlineKeyboardMarkup(kb), parse_mode='Markdown')
 async def send_wyr_round(context, p1, p2):
     q = random.choice(GAME_DATA["wyr"])
     kb = [[InlineKeyboardButton(f"🅰️ {q[0]}", callback_data="wyr_a"), InlineKeyboardButton(f"🅱️ {q[1]}", callback_data="wyr_b")]]
@@ -679,9 +680,13 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if data.startswith("tod_pick_"):
         mode = data.split("_")[2] # truth or dare
         partner_id = ACTIVE_CHATS.get(uid)
+        
+        # 1. Notify the person who clicked (You)
         await q.edit_message_text(f"✅ You picked **{mode.upper()}**.\nWaiting for partner to ask...", parse_mode='Markdown')
+        
+        # 2. Send the Question Menu to the Partner (Asker)
         if partner_id:
-            # Send options to the PARTNER (Asker)
+            # FIX: Passing 'context' and 'partner_id' correctly
             await send_tod_options(context, partner_id, mode)
         return
     
