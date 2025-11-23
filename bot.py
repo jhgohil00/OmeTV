@@ -464,59 +464,6 @@ async def handle_text_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # 1. GAME ANSWER LOGIC (The Answer)
     # Check if this user is supposed to be answering a question
-# 🔵 WYR DISCUSSION PHASE (PHASE 18)
-        if user_id in GAME_STATES and GAME_STATES[user_id].get("status") == "discussing":
-            gd = GAME_STATES[user_id]
-            
-            # 1. Forward the Explanation
-            try:
-                await update.message.copy(chat_id=partner_id, caption=f"🗣️ **Because...**")
-                await update.message.reply_text("✅ Explanation Sent.")
-                
-                # 2. Mark this user as "Explained"
-                if "explained" not in gd: gd["explained"] = []
-                if user_id not in gd["explained"]: gd["explained"].append(user_id)
-                
-                # 3. Check if BOTH have explained
-                if len(gd["explained"]) >= 2:
-                    await context.bot.send_message(user_id, "✨ **Both explained! Next Round...**")
-                    await context.bot.send_message(partner_id, "✨ **Both explained! Next Round...**")
-                    
-                    # Reset State & Start Next Round
-                    gd["status"] = "playing"
-                    await asyncio.sleep(1.5)
-                    await send_wyr_round(context, user_id, partner_id)
-                    
-            except Exception as e:
-                print(f"WYR Relay Error: {e}")
-            return
-    if user_id in GAME_STATES and GAME_STATES[user_id].get("status") == "answering":
-        partner_id = ACTIVE_CHATS.get(user_id)
-        if partner_id:
-            # Send Answer to Partner
-            await context.bot.send_message(partner_id, f"🗣️ **Answer:** {text}", parse_mode='Markdown')
-            await update.message.reply_text("✅ Sent.")
-            
-            # Reset Status
-            GAME_STATES[user_id]["status"] = "playing"
-            GAME_STATES[partner_id]["status"] = "playing"
-            
-            # SWAP TURNS (Now Partner picks Truth/Dare)
-            await send_tod_turn(context, partner_id)
-        return
-
-    # 2. MANUAL QUESTION INPUT (The Asker)
-    if context.user_data.get("state") == "GAME_MANUAL":
-        partner_id = ACTIVE_CHATS.get(user_id)
-        if partner_id:
-            await context.bot.send_message(partner_id, f"🎲 **QUESTION:**\n{text}\n\n*Type your answer...*", parse_mode='Markdown')
-            await update.message.reply_text("✅ Question Sent. Waiting for answer...")
-            
-            # Set Partner to Answering Mode
-            if partner_id in GAME_STATES:
-                GAME_STATES[partner_id]["status"] = "answering"
-        context.user_data["state"] = None
-        return
 
     # 3. ONBOARDING
     if context.user_data.get("state") == "ONBOARDING_INTEREST":
@@ -681,6 +628,32 @@ async def relay_message(update, context):
             ACTIVE_CHATS[user_id] = partner_id # Repopulate RAM
 
     if partner_id:
+        # 🔵 WYR DISCUSSION PHASE (PHASE 18)
+        if user_id in GAME_STATES and GAME_STATES[user_id].get("status") == "discussing":
+            gd = GAME_STATES[user_id]
+            
+            # 1. Forward the Explanation
+            try:
+                await update.message.copy(chat_id=partner_id, caption=f"🗣️ **Because...**")
+                await update.message.reply_text("✅ Explanation Sent.")
+                
+                # 2. Mark this user as "Explained"
+                if "explained" not in gd: gd["explained"] = []
+                if user_id not in gd["explained"]: gd["explained"].append(user_id)
+                
+                # 3. Check if BOTH have explained
+                if len(gd["explained"]) >= 2:
+                    await context.bot.send_message(user_id, "✨ **Both explained! Next Round...**")
+                    await context.bot.send_message(partner_id, "✨ **Both explained! Next Round...**")
+                    
+                    # Reset State & Start Next Round
+                    gd["status"] = "playing"
+                    await asyncio.sleep(1.5)
+                    await send_wyr_round(context, user_id, partner_id)
+                    
+            except Exception as e:
+                print(f"WYR Relay Error: {e}")
+            return
         # 🟢 GAME ANSWER LOGIC (MOVED HERE TO SUPPORT MEDIA)
         # Check if this user is supposed to be answering a question
         if user_id in GAME_STATES and GAME_STATES[user_id].get("status") == "answering":
@@ -806,7 +779,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 # Mark partner as answering
                 if partner_id in GAME_STATES: GAME_STATES[partner_id]["status"] = "answering"
         return
-
+        if data == "tod_manual": context.user_data["state"] = "GAME_MANUAL"; await q.edit_message_text("✍️ **Type your question now:**"); return
 # ROCK PAPER SCISSORS LOGIC
     # ROCK PAPER SCISSORS (TOURNAMENT EDITION)
     if data.startswith("rps_"):
