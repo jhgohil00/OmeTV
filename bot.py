@@ -914,10 +914,31 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if data == "wyr_skip":
         gd = GAME_STATES.get(uid)
         pid = ACTIVE_CHATS.get(uid)
-        if gd:
-            await q.message.reply_text("⏭️ **Skipping discussion...**")
-            if pid: await context.bot.send_message(pid, "⏭️ **Partner skipped discussion.**")
-            await send_wyr_round(context, uid, pid)
+        
+        # Only process if in discussing phase
+        if gd and gd.get("status") == "discussing":
+            # 1. Initialize 'explained' list if missing
+            if "explained" not in gd: gd["explained"] = []
+            
+            # 2. Mark this user as DONE (Treat Skip as an 'Answer')
+            if uid not in gd["explained"]:
+                gd["explained"].append(uid)
+                await q.edit_message_text("⏭️ **You skipped.** Waiting for partner...")
+                if pid: await context.bot.send_message(pid, "⏭️ **Partner skipped discussion.**")
+            else:
+                await q.answer("⏳ Waiting for partner...", show_alert=True)
+                return
+
+            # 3. Check if BOTH are done (Meaning: Both Skipped, or 1 Skipped + 1 Answered)
+            if len(gd["explained"]) >= 2:
+                # Notify
+                if pid: await context.bot.send_message(pid, "✨ **Next Round...**")
+                await context.bot.send_message(uid, "✨ **Next Round...**")
+                
+                # Reset State & Start Next Round
+                gd["status"] = "playing"
+                await asyncio.sleep(1.5)
+                if pid: await send_wyr_round(context, uid, pid)
         return
 
     # ONBOARDING
