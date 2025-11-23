@@ -255,7 +255,8 @@ async def offer_game(update, context, user_id, game_name):
 
 async def start_game_session(update, context, game_name, p1, p2):
     # P1 = Offerer, P2 = Accepter
-    GAME_STATES[p1] = GAME_STATES[p2] = {"game": game_name, "turn": p2, "partner": p2, "status": "playing"}
+    # P1 = Offerer, P2 = Accepter
+    GAME_STATES[p1] = GAME_STATES[p2] = {"game": game_name, "turn": p2, "partner": p2, "status": "playing", "moves": {}}
     
     kb = get_keyboard_game()
     await context.bot.send_message(p1, f"🎮 **Started: {game_name}**", reply_markup=kb, parse_mode='Markdown')
@@ -523,8 +524,8 @@ async def handle_text_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # 5. GAME MENU
     if text == "🎮 Games":
         kb = [[InlineKeyboardButton("😈 Truth or Dare", callback_data="game_offer_Truth or Dare")],
-              [InlineKeyboardButton("🎲 Would You Rather (Soon)", callback_data="game_soon")],
-              [InlineKeyboardButton("✂️ RPS (Soon)", callback_data="game_soon")]]
+              [InlineKeyboardButton("🎲 Would You Rather", callback_data="game_offer_Would You Rather")],
+              [InlineKeyboardButton("✂️ Rock Paper Scissors", callback_data="game_offer_Rock Paper Scissors")]]
         await update.message.reply_text("🎮 **Game Center**", reply_markup=InlineKeyboardMarkup(kb), parse_mode='Markdown'); return
     
     if text == "🛑 Stop Game":
@@ -781,6 +782,72 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await q.edit_message_text(f"✅ Asked: {q_text}")
                 # Mark partner as answering
                 if partner_id in GAME_STATES: GAME_STATES[partner_id]["status"] = "answering"
+        return
+
+# ROCK PAPER SCISSORS LOGIC
+    if data.startswith("rps_"):
+        move = data.split("_")[1]
+        gd = GAME_STATES.get(uid)
+        if not gd: return
+        
+        # 1. Save Move
+        gd["moves"][uid] = move
+        await q.edit_message_text(f"✅ You chose **{move.upper()}**.\nWaiting for partner...")
+        
+        # 2. Check if both played
+        partner_id = ACTIVE_CHATS.get(uid)
+        if partner_id and partner_id in gd["moves"]:
+            p_move = gd["moves"][partner_id]
+            
+            # 3. Calculate Winner
+            res = "🤝 **DRAW!**"
+            if move == p_move: res = "🤝 **DRAW!**"
+            elif (move == "rock" and p_move == "scissors") or \
+                 (move == "paper" and p_move == "rock") or \
+                 (move == "scissors" and p_move == "paper"):
+                res = "🏆 **YOU WON!**"
+            else:
+                res = "💀 **YOU LOST!**"
+            
+            # Mirror result for partner
+            p_res = "🏆 **YOU WON!**" if "LOST" in res else ("💀 **YOU LOST!**" if "WON" in res else "🤝 **DRAW!**")
+            
+            # 4. Send Results
+            await context.bot.send_message(uid, f"You: {move} | Partner: {p_move}\n\n{res}", parse_mode='Markdown')
+            await context.bot.send_message(partner_id, f"You: {p_move} | Partner: {move}\n\n{p_res}", parse_mode='Markdown')
+            
+            # 5. Reset for Next Round
+            gd["moves"] = {}
+            await asyncio.sleep(2) # Breathing room
+            await send_rps_round(context, uid, partner_id)
+        return
+
+    # WOULD YOU RATHER LOGIC
+    if data.startswith("wyr_"):
+        choice = data.split("_")[1].upper() # A or B
+        gd = GAME_STATES.get(uid)
+        if not gd: return
+        
+        # 1. Save Vote
+        gd["moves"][uid] = choice
+        await q.edit_message_text(f"✅ You voted **Option {choice}**.\nWaiting for partner...")
+        
+        # 2. Check if both voted
+        partner_id = ACTIVE_CHATS.get(uid)
+        if partner_id and partner_id in gd["moves"]:
+            p_choice = gd["moves"][partner_id]
+            
+            # 3. Send Results
+            msg = f"📊 **RESULTS**\n\n👤 You: **Option {choice}**\n👤 Partner: **Option {p_choice}**"
+            p_msg = f"📊 **RESULTS**\n\n👤 You: **Option {p_choice}**\n👤 Partner: **Option {choice}**"
+            
+            await context.bot.send_message(uid, msg, parse_mode='Markdown')
+            await context.bot.send_message(partner_id, p_msg, parse_mode='Markdown')
+            
+            # 4. Next Round
+            gd["moves"] = {}
+            await asyncio.sleep(2)
+            await send_wyr_round(context, uid, partner_id)
         return
 
     if data == "tod_manual": context.user_data["state"] = "GAME_MANUAL"; await q.edit_message_text("✍️ **Type your question now:**"); return
