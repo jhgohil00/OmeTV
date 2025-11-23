@@ -392,12 +392,41 @@ async def handle_feedback_command(update: Update, context: ContextTypes.DEFAULT_
 async def send_onboarding_step(update, step):
     kb = []
     msg = ""
-    if step == 1: msg, kb = "1️⃣ **Gender?**", [[InlineKeyboardButton("Male", callback_data="set_gen_Male"), InlineKeyboardButton("Female", callback_data="set_gen_Female")], [InlineKeyboardButton("Skip", callback_data="set_gen_Hidden")]]
-    elif step == 2: msg, kb = "2️⃣ **Age?**", [[InlineKeyboardButton("18-22", callback_data="set_age_18"), InlineKeyboardButton("23-30", callback_data="set_age_23")], [InlineKeyboardButton("Skip", callback_data="set_age_Hidden")]]
-    elif step == 3: msg, kb = "3️⃣ **Lang?**", [[InlineKeyboardButton("English", callback_data="set_lang_English"), InlineKeyboardButton("Hindi", callback_data="set_lang_Hindi"), InlineKeyboardButton("Indo", callback_data="set_lang_Indo")], [InlineKeyboardButton("Skip", callback_data="set_lang_English")]]
-    elif step == 4: msg, kb = "4️⃣ **Region?**", [[InlineKeyboardButton("Asia", callback_data="set_reg_Asia"), InlineKeyboardButton("Europe", callback_data="set_reg_Europe")], [InlineKeyboardButton("Skip", callback_data="set_reg_Hidden")]]
-    elif step == 5: msg, kb = "5️⃣ **Mood?**", [[InlineKeyboardButton("Happy", callback_data="set_mood_Happy"), InlineKeyboardButton("Bored", callback_data="set_mood_Bored"), InlineKeyboardButton("Don't Know", callback_data="set_mood_Confused")], [InlineKeyboardButton("Skip", callback_data="set_mood_Neutral")]]
-    elif step == 6: msg, kb = "6️⃣ **Interests?**\nType keywords or Skip.", [[InlineKeyboardButton("Skip", callback_data="onboarding_done")]]
+    
+    if step == 1:
+        msg = "1️⃣ **What's your gender?**"
+        kb = [[InlineKeyboardButton("👨 Male", callback_data="set_gen_Male"), InlineKeyboardButton("👩 Female", callback_data="set_gen_Female")], 
+              [InlineKeyboardButton("🌈 Other", callback_data="set_gen_Other"), InlineKeyboardButton("⏭️ Skip", callback_data="set_gen_Hidden")]]
+    
+    elif step == 2:
+        msg = "2️⃣ **Age Group?**"
+        kb = [[InlineKeyboardButton("👦 ~18", callback_data="set_age_~18"), InlineKeyboardButton("🧢 20-25", callback_data="set_age_20-25")], 
+              [InlineKeyboardButton("💼 25-30", callback_data="set_age_25-30"), InlineKeyboardButton("☕ 30+", callback_data="set_age_30+")],
+              [InlineKeyboardButton("⏭️ Skip", callback_data="set_age_Hidden")]]
+    
+    elif step == 3:
+        msg = "3️⃣ **Primary Language?**"
+        kb = [[InlineKeyboardButton("🇺🇸 English", callback_data="set_lang_English"), InlineKeyboardButton("🇮🇳 Hindi", callback_data="set_lang_Hindi")],
+              [InlineKeyboardButton("🇮🇩 Indo", callback_data="set_lang_Indo"), InlineKeyboardButton("🇪🇸 Spanish", callback_data="set_lang_Spanish")],
+              [InlineKeyboardButton("🇫🇷 French", callback_data="set_lang_French"), InlineKeyboardButton("🇯🇵 Japanese", callback_data="set_lang_Japanese")],
+              [InlineKeyboardButton("🌍 Other", callback_data="set_lang_Other"), InlineKeyboardButton("⏭️ Skip", callback_data="set_lang_English")]]
+    
+    elif step == 4:
+        msg = "4️⃣ **Region?**"
+        kb = [[InlineKeyboardButton("🌏 Asia 🗻", callback_data="set_reg_Asia"), InlineKeyboardButton("🌍 Europe 🍷", callback_data="set_reg_Europe")],
+              [InlineKeyboardButton("🌎 America 🗽", callback_data="set_reg_America"), InlineKeyboardButton("🌍 Africa 🌴", callback_data="set_reg_Africa")],
+              [InlineKeyboardButton("⏭️ Skip", callback_data="set_reg_Hidden")]]
+    
+    elif step == 5:
+        msg = "5️⃣ **Current Mood?**"
+        kb = [[InlineKeyboardButton("😃 Happy", callback_data="set_mood_Happy"), InlineKeyboardButton("😔 Sad", callback_data="set_mood_Sad")],
+              [InlineKeyboardButton("😴 Bored", callback_data="set_mood_Bored"), InlineKeyboardButton("🤔 Don't Know", callback_data="set_mood_Confused")],
+              [InlineKeyboardButton("🥀 Lonely", callback_data="set_mood_Lonely"), InlineKeyboardButton("😰 Anxious", callback_data="set_mood_Anxious")],
+              [InlineKeyboardButton("⏭️ Skip", callback_data="set_mood_Neutral")]]
+    
+    elif step == 6:
+        msg = "6️⃣ **Final Step! Interests**\n\nType keywords (e.g., *Cricket, Movies*) or click Skip."
+        kb = [[InlineKeyboardButton("⏭️ Skip & Finish", callback_data="onboarding_done")]]
 
     try:
         if update.callback_query: await update.callback_query.edit_message_text(msg, reply_markup=InlineKeyboardMarkup(kb), parse_mode='Markdown')
@@ -519,6 +548,21 @@ async def handle_text_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ==============================================================================
 # 🔌 FAST CONNECTION LOGIC (RAM + DB)
 # ==============================================================================
+async def stop_search_process(update, context):
+    user_id = update.effective_user.id
+    conn = get_conn(); cur = conn.cursor()
+    # 1. Set Status to Idle
+    cur.execute("UPDATE users SET status = 'idle' WHERE user_id = %s", (user_id,))
+    conn.commit(); cur.close(); release_conn(conn)
+    
+    # 2. Send Feedback & Show Lobby
+    try:
+        if update.callback_query:
+            await update.callback_query.message.reply_text("🛑 **Search Stopped.**", reply_markup=get_keyboard_lobby(), parse_mode='Markdown')
+        else:
+            await update.message.reply_text("🛑 **Search Stopped.**", reply_markup=get_keyboard_lobby(), parse_mode='Markdown')
+    except: pass
+
 async def start_search(update, context):
     user_id = update.effective_user.id
     # Fast Check RAM First
@@ -823,5 +867,5 @@ if __name__ == '__main__':
         app.add_handler(CallbackQueryHandler(button_handler))
         app.add_handler(MessageHandler(filters.ALL, relay_message))
         
-        print("🤖 PHASE 14 BOT LIVE")
+        print("🤖 PHASE 15 BOT LIVE")
         app.run_polling()
