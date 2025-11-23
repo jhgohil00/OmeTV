@@ -7,6 +7,7 @@ import os
 import threading
 import random  # <--- NEW
 import time  # <--- THIS WAS MISSING
+from game_data import GAME_DATA
 from flask import Flask
 from telegram import (
     InlineKeyboardButton, InlineKeyboardMarkup, 
@@ -37,28 +38,6 @@ ACTIVE_CHATS = {}
 # --- GAME STATE & DATA ---
 GAME_STATES = {}       # {user_id: {'game': 'tod', 'turn': uid, 'partner': pid}}
 GAME_COOLDOWNS = {}    # {user_id: timestamp}
-
-GAME_DATA = {
-    "tod_truth": [
-        "What is your biggest fear?", "What is the last lie you told?", "Who is your secret crush?",
-        "What is your most embarrassing moment?", "Have you ever cheated on a test?",
-        "What is the worst gift you ever received?", "What is your biggest regret?",
-        "When was the last time you cried?", "What is a secret you've never told anyone?",
-        "If you could switch lives with one person, who would it be?"
-    ],
-    "tod_dare": [
-        "Send a voice note singing 'Happy Birthday'.", "Send the 3rd photo in your gallery.",
-        "Type a message with your nose.", "Send a sticker that describes you.",
-        "Do 10 pushups and send a video note.",
-        "Talk in emojis for the next 3 turns.", "Describe your crush without naming them.",
-        "Send a screenshot of your home screen."
-    ],
-    "wyr": [
-        ("Be invisible", "Be able to fly"), ("Always be cold", "Always be hot"),
-        ("Have unlimited money", "Have unlimited time"), ("Know how you die", "Know when you die"),
-        ("Explore Space", "Explore the Ocean"), ("Talk to animals", "Speak all languages")
-    ]
-}
 
 # 2. DB POOL: Keeps connections open so we don't "dial" the DB every time.
 DB_POOL = None
@@ -263,8 +242,9 @@ async def start_game_session(update, context, game_raw, p1, p2):
 
     # Init State with Scoreboard
     # s1 = P1's score, s2 = P2's score, cr = current round
+    # Added: 'streak' (for WYR), 'explained' (set of who answered why)
     state = {"game": game_name, "turn": p2, "partner": p2, "status": "playing", "moves": {}, 
-             "max_r": rounds, "cur_r": 1, "s1": 0, "s2": 0}
+             "max_r": rounds, "cur_r": 1, "s1": 0, "s2": 0, "streak": 0, "explained": []}
     
     GAME_STATES[p1] = GAME_STATES[p2] = state
     
@@ -308,7 +288,10 @@ async def send_tod_options(context, target_id, mode):
     await context.bot.send_message(target_id, msg_text, reply_markup=InlineKeyboardMarkup(kb), parse_mode='Markdown')
 async def send_wyr_round(context, p1, p2):
     q = random.choice(GAME_DATA["wyr"])
-    kb = [[InlineKeyboardButton(f"🅰️ {q[0]}", callback_data="wyr_a"), InlineKeyboardButton(f"🅱️ {q[1]}", callback_data="wyr_b")]]
+    kb = [
+        [InlineKeyboardButton(f"🅰️ {q[0]}", callback_data="wyr_a")],
+        [InlineKeyboardButton(f"🅱️ {q[1]}", callback_data="wyr_b")]
+    ]
     await context.bot.send_message(p1, "⚖️ **Would You Rather...**", reply_markup=InlineKeyboardMarkup(kb), parse_mode='Markdown')
     await context.bot.send_message(p2, "⚖️ **Would You Rather...**", reply_markup=InlineKeyboardMarkup(kb), parse_mode='Markdown')
 
@@ -481,6 +464,32 @@ async def handle_text_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # 1. GAME ANSWER LOGIC (The Answer)
     # Check if this user is supposed to be answering a question
+# 🔵 WYR DISCUSSION PHASE (PHASE 18)
+        if user_id in GAME_STATES and GAME_STATES[user_id].get("status") == "discussing":
+            gd = GAME_STATES[user_id]
+            
+            # 1. Forward the Explanation
+            try:
+                await update.message.copy(chat_id=partner_id, caption=f"🗣️ **Because...**")
+                await update.message.reply_text("✅ Explanation Sent.")
+                
+                # 2. Mark this user as "Explained"
+                if "explained" not in gd: gd["explained"] = []
+                if user_id not in gd["explained"]: gd["explained"].append(user_id)
+                
+                # 3. Check if BOTH have explained
+                if len(gd["explained"]) >= 2:
+                    await context.bot.send_message(user_id, "✨ **Both explained! Next Round...**")
+                    await context.bot.send_message(partner_id, "✨ **Both explained! Next Round...**")
+                    
+                    # Reset State & Start Next Round
+                    gd["status"] = "playing"
+                    await asyncio.sleep(1.5)
+                    await send_wyr_round(context, user_id, partner_id)
+                    
+            except Exception as e:
+                print(f"WYR Relay Error: {e}")
+            return
     if user_id in GAME_STATES and GAME_STATES[user_id].get("status") == "answering":
         partner_id = ACTIVE_CHATS.get(user_id)
         if partner_id:
@@ -883,6 +892,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     # WOULD YOU RATHER LOGIC
+    # WOULD YOU RATHER (SOCIAL ENGINE 2.0)
     if data.startswith("wyr_"):
         choice = data.split("_")[1].upper() # A or B
         gd = GAME_STATES.get(uid)
@@ -897,20 +907,45 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if partner_id and partner_id in gd["moves"]:
             p_choice = gd["moves"][partner_id]
             
-            # 3. Send Results
-            msg = f"📊 **RESULTS**\n\n👤 You: **Option {choice}**\n👤 Partner: **Option {p_choice}**"
-            p_msg = f"📊 **RESULTS**\n\n👤 You: **Option {p_choice}**\n👤 Partner: **Option {choice}**"
-            
-            await context.bot.send_message(uid, msg, parse_mode='Markdown')
-            await context.bot.send_message(partner_id, p_msg, parse_mode='Markdown')
-            
-            # 4. Next Round
-            gd["moves"] = {}
-            await asyncio.sleep(2)
-            await send_wyr_round(context, uid, partner_id)
-        return
+            # 3. Analyze Compatibility
+            match_text = ""
+            if choice == p_choice:
+                gd["streak"] = gd.get("streak", 0) + 1
+                s = gd["streak"]
+                match_text = f"🔥 **100% MATCH!** (Streak: {s})"
+                if s == 2: match_text += "\n*2 in a row! Are you twins?* 👯"
+                if s >= 3: match_text += "\n*PERFECT SYNC! Soulmates?* 💍"
+            else:
+                gd["streak"] = 0
+                match_text = "⚡ **DIFFERENT POV!** (Streak Reset)"
 
-    if data == "tod_manual": context.user_data["state"] = "GAME_MANUAL"; await q.edit_message_text("✍️ **Type your question now:**"); return
+            # 4. Announce & Trigger "Interrogation Phase"
+            msg = f"📊 **RESULTS:**\n\n👤 You: **{choice}**\n👤 Partner: **{p_choice}**\n\n{match_text}\n\n👇 **Tell your partner WHY you chose that!**"
+            p_msg = f"📊 **RESULTS:**\n\n👤 You: **{p_choice}**\n👤 Partner: **{choice}**\n\n{match_text}\n\n👇 **Tell your partner WHY you chose that!**"
+            
+            # Switch State to "Discussion"
+            gd["status"] = "discussing"
+            gd["explained"] = [] # Reset explanation tracker
+            
+            # Add a Skip Button (Emergency Exit)
+            kb = [[InlineKeyboardButton("⏭️ Skip Discussion", callback_data="wyr_skip")]]
+            
+            await context.bot.send_message(uid, msg, parse_mode='Markdown', reply_markup=InlineKeyboardMarkup(kb))
+            await context.bot.send_message(partner_id, p_msg, parse_mode='Markdown', reply_markup=InlineKeyboardMarkup(kb))
+            
+            # Reset moves for safety
+            gd["moves"] = {}
+        return
+    
+    # WYR SKIP HANDLER
+    if data == "wyr_skip":
+        gd = GAME_STATES.get(uid)
+        pid = ACTIVE_CHATS.get(uid)
+        if gd:
+            await q.message.reply_text("⏭️ **Skipping discussion...**")
+            if pid: await context.bot.send_message(pid, "⏭️ **Partner skipped discussion.**")
+            await send_wyr_round(context, uid, pid)
+        return
 
     # ONBOARDING
     if data.startswith("set_gen_"): await update_user(uid, "gender", data.split("_")[2]); await send_onboarding_step(update, 2); return
