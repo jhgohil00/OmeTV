@@ -253,10 +253,20 @@ async def offer_game(update, context, user_id, game_name):
     await context.bot.send_message(user_id, f"🎮 **Offered {game_name}**\nWaiting for partner...", parse_mode='Markdown')
     await context.bot.send_message(partner_id, f"🎮 **Game Request**\nPartner wants to play **{game_name}**.", reply_markup=InlineKeyboardMarkup(kb), parse_mode='Markdown')
 
-async def start_game_session(update, context, game_name, p1, p2):
-    # P1 = Offerer, P2 = Accepter
-    # P1 = Offerer, P2 = Accepter
-    GAME_STATES[p1] = GAME_STATES[p2] = {"game": game_name, "turn": p2, "partner": p2, "status": "playing", "moves": {}}
+async def start_game_session(update, context, game_raw, p1, p2):
+    # Detect Rounds (Format: "RPS|3")
+    rounds = 1
+    game_name = game_raw
+    if "|" in game_raw:
+        game_name = "Rock Paper Scissors"
+        rounds = int(game_raw.split("|")[1])
+
+    # Init State with Scoreboard
+    # s1 = P1's score, s2 = P2's score, cr = current round
+    state = {"game": game_name, "turn": p2, "partner": p2, "status": "playing", "moves": {}, 
+             "max_r": rounds, "cur_r": 1, "s1": 0, "s2": 0}
+    
+    GAME_STATES[p1] = GAME_STATES[p2] = state
     
     kb = get_keyboard_game()
     await context.bot.send_message(p1, f"🎮 **Started: {game_name}**", reply_markup=kb, parse_mode='Markdown')
@@ -525,7 +535,7 @@ async def handle_text_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if text == "🎮 Games":
         kb = [[InlineKeyboardButton("😈 Truth or Dare", callback_data="game_offer_Truth or Dare")],
               [InlineKeyboardButton("🎲 Would You Rather", callback_data="game_offer_Would You Rather")],
-              [InlineKeyboardButton("✂️ Rock Paper Scissors", callback_data="game_offer_Rock Paper Scissors")]]
+              [InlineKeyboardButton("✂️ Rock Paper Scissors", callback_data="rps_mode_select")]]
         await update.message.reply_text("🎮 **Game Center**", reply_markup=InlineKeyboardMarkup(kb), parse_mode='Markdown'); return
     
     if text == "🛑 Stop Game":
@@ -742,6 +752,10 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
     await q.answer()
     data = q.data
+# RPS SUB-MENU
+    if data == "rps_mode_select":
+        kb = [[InlineKeyboardButton("Best of 3", callback_data="game_offer_RPS|3"), InlineKeyboardButton("Best of 5", callback_data="game_offer_RPS|5")]]
+        await q.edit_message_text("🔢 **Select Rounds:**", reply_markup=InlineKeyboardMarkup(kb)); return
     uid = q.from_user.id
     # NEW SETTINGS REDIRECTS
     if data == "set_gen_menu": await send_onboarding_step(update, 1); return
@@ -785,6 +799,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
 # ROCK PAPER SCISSORS LOGIC
+    # ROCK PAPER SCISSORS (TOURNAMENT EDITION)
     if data.startswith("rps_"):
         move = data.split("_")[1]
         gd = GAME_STATES.get(uid)
@@ -799,27 +814,72 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if partner_id and partner_id in gd["moves"]:
             p_move = gd["moves"][partner_id]
             
-            # 3. Calculate Winner
-            res = "🤝 **DRAW!**"
-            if move == p_move: res = "🤝 **DRAW!**"
+            # 3. Calculate ROUND Winner
+            r_res = "🤝 Draw"
+            winner = None # None, p1, or p2
+            
+            # Determine Offerer (p1) vs Accepter (p2) for scoring
+            # We stored scores as s1 (for p1) and s2 (for p2)
+            # We need to know who 'uid' is relative to the game owner
+            # But simpler: Just track scores by ID? 
+            # Let's use the 'turn' logic or just simple ID comparison? 
+            # FAST FIX: Since both share the SAME dictionary object, we can just update gd['s1'] if uid < partner_id else...
+            # Wait, easier: Just send the text.
+            
+            if move == p_move: r_res = "🤝 Draw"
             elif (move == "rock" and p_move == "scissors") or \
                  (move == "paper" and p_move == "rock") or \
                  (move == "scissors" and p_move == "paper"):
-                res = "🏆 **YOU WON!**"
+                 r_res = f"🏆 You ({move}) beat {p_move}!"
+                 winner = uid
             else:
-                res = "💀 **YOU LOST!**"
+                 r_res = f"💀 You ({move}) lost to {p_move}!"
+                 winner = partner_id
+
+            # Update Scoreboard
+            if winner == uid: gd[f"s_{uid}"] = gd.get(f"s_{uid}", 0) + 1
+            elif winner == partner_id: gd[f"s_{partner_id}"] = gd.get(f"s_{partner_id}", 0) + 1
             
-            # Mirror result for partner
-            p_res = "🏆 **YOU WON!**" if "LOST" in res else ("💀 **YOU LOST!**" if "WON" in res else "🤝 **DRAW!**")
+            # Get Current Scores
+            sc_me = gd.get(f"s_{uid}", 0)
+            sc_pa = gd.get(f"s_{partner_id}", 0)
             
-            # 4. Send Results
-            await context.bot.send_message(uid, f"You: {move} | Partner: {p_move}\n\n{res}", parse_mode='Markdown')
-            await context.bot.send_message(partner_id, f"You: {p_move} | Partner: {move}\n\n{p_res}", parse_mode='Markdown')
-            
-            # 5. Reset for Next Round
-            gd["moves"] = {}
-            await asyncio.sleep(2) # Breathing room
-            await send_rps_round(context, uid, partner_id)
+            # 4. Check Tournament Status
+            if gd["cur_r"] >= gd["max_r"]:
+                # GAME OVER - FINAL RESULTS
+                final_res = "🤝 **MATCH DRAW!**"
+                if sc_me > sc_pa: final_res = "🏆 **YOU WON THE MATCH!**"
+                elif sc_pa > sc_me: final_res = "💀 **YOU LOST THE MATCH!**"
+                
+                p_final = "🏆 **YOU WON THE MATCH!**" if "LOST" in final_res else ("💀 **YOU LOST THE MATCH!**" if "WON" in final_res else final_res)
+
+                msg = f"🏁 **FINAL SCORE (Best of {gd['max_r']})**\n━━━━━━━━━━━━\nYou: {sc_me} | Partner: {sc_pa}\n\n{final_res}"
+                p_msg = f"🏁 **FINAL SCORE (Best of {gd['max_r']})**\n━━━━━━━━━━━━\nYou: {sc_pa} | Partner: {sc_me}\n\n{p_final}"
+                
+                await context.bot.send_message(uid, msg, parse_mode='Markdown', reply_markup=get_keyboard_game())
+                await context.bot.send_message(partner_id, p_msg, parse_mode='Markdown', reply_markup=get_keyboard_game())
+                
+                # Cleanup
+                gd["moves"] = {}
+                # Keep state briefly or delete? Let's delete to prevent glitches
+                del GAME_STATES[uid]
+                del GAME_STATES[partner_id]
+                
+            else:
+                # NEXT ROUND
+                p_r_res = f"🏆 You ({p_move}) beat {move}!" if winner == partner_id else (f"💀 You ({p_move}) lost to {move}!" if winner == uid else "🤝 Draw")
+                
+                msg = f"🔔 **Round {gd['cur_r']} Result:**\n{r_res}\n\n📊 Score: {sc_me} - {sc_pa}\n⏳ Next round..."
+                p_msg = f"🔔 **Round {gd['cur_r']} Result:**\n{p_r_res}\n\n📊 Score: {sc_pa} - {sc_me}\n⏳ Next round..."
+
+                await context.bot.send_message(uid, msg, parse_mode='Markdown')
+                await context.bot.send_message(partner_id, p_msg, parse_mode='Markdown')
+                
+                # Setup Next Round
+                gd["cur_r"] += 1
+                gd["moves"] = {}
+                await asyncio.sleep(2)
+                await send_rps_round(context, uid, partner_id)
         return
 
     # WOULD YOU RATHER LOGIC
