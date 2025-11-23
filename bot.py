@@ -288,12 +288,18 @@ async def send_tod_options(context, target_id, mode):
     await context.bot.send_message(target_id, msg_text, reply_markup=InlineKeyboardMarkup(kb), parse_mode='Markdown')
 async def send_wyr_round(context, p1, p2):
     q = random.choice(GAME_DATA["wyr"])
+    
+    # 1. Put the LONG text in the Message (No limits here)
+    msg = f"⚖️ **Would You Rather...**\n\n🅰️ **{q[0]}**\n       ➖ OR ➖\n🅱️ **{q[1]}**"
+    
+    # 2. Keep the buttons simple so they never cut off
     kb = [
-        [InlineKeyboardButton(f"🅰️ {q[0]}", callback_data="wyr_a")],
-        [InlineKeyboardButton(f"🅱️ {q[1]}", callback_data="wyr_b")]
+        [InlineKeyboardButton("🅰️ Choose Option A", callback_data="wyr_a")],
+        [InlineKeyboardButton("🅱️ Choose Option B", callback_data="wyr_b")]
     ]
-    await context.bot.send_message(p1, "⚖️ **Would You Rather...**", reply_markup=InlineKeyboardMarkup(kb), parse_mode='Markdown')
-    await context.bot.send_message(p2, "⚖️ **Would You Rather...**", reply_markup=InlineKeyboardMarkup(kb), parse_mode='Markdown')
+    
+    await context.bot.send_message(p1, msg, reply_markup=InlineKeyboardMarkup(kb), parse_mode='Markdown')
+    await context.bot.send_message(p2, msg, reply_markup=InlineKeyboardMarkup(kb), parse_mode='Markdown')
 
 async def send_rps_round(context, p1, p2):
     kb = [[InlineKeyboardButton("🪨", callback_data="rps_rock"), InlineKeyboardButton("📄", callback_data="rps_paper"), InlineKeyboardButton("✂️", callback_data="rps_scissors")]]
@@ -779,7 +785,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 # Mark partner as answering
                 if partner_id in GAME_STATES: GAME_STATES[partner_id]["status"] = "answering"
         return
-        if data == "tod_manual": context.user_data["state"] = "GAME_MANUAL"; await q.edit_message_text("✍️ **Type your question now:**"); return
+    if data == "tod_manual": context.user_data["state"] = "GAME_MANUAL"; await q.edit_message_text("✍️ **Type your question now:**"); return
 # ROCK PAPER SCISSORS LOGIC
     # ROCK PAPER SCISSORS (TOURNAMENT EDITION)
     if data.startswith("rps_"):
