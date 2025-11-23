@@ -866,7 +866,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # WOULD YOU RATHER LOGIC
     # WOULD YOU RATHER (SOCIAL ENGINE 2.0)
-    if data.startswith("wyr_"):
+    if data.startswith("wyr_") and data != "wyr_skip":
         choice = data.split("_")[1].upper() # A or B
         gd = GAME_STATES.get(uid)
         if not gd: return
