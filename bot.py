@@ -447,7 +447,7 @@ async def send_onboarding_step(update, step):
               [InlineKeyboardButton("⏭️ Skip", callback_data="set_mood_Neutral")]]
     
     elif step == 6:
-        msg = "6️⃣ **Final Step! Interests**\n\nType keywords (e.g., *Cricket, Movies*) or click Skip."
+        msg = "6️⃣ **Final Step! Interests**\n\nType keywords (e.g., *Music, Movies,kdrama..*) or click Skip."
         kb = [[InlineKeyboardButton("⏭️ Skip & Finish", callback_data="onboarding_done")]]
 
     try:
@@ -472,7 +472,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
                    (user.id, user.username, user.first_name, user.username, user.first_name))
     conn.commit(); cur.close(); release_conn(conn)
 
-    welcome_msg = "👋 **Welcome to OmeTV Chatbot!**\n\nConnect with strangers worldwide. 🌍\nNo names. No login.\n\n*Let's vibe check.* 👇"
+    welcome_msg = "👋 **Welcome to OmeTV Chatbot🤖**\n\nConnect with strangers worldwide 🌍\nNo names. No login.End to End encrypted\n\n*Let's vibe check.* 👇"
     if not data or data[1] == 'Hidden':
         await update.message.reply_text(welcome_msg, reply_markup=ReplyKeyboardRemove(), parse_mode='Markdown')
         await send_onboarding_step(update, 1)
@@ -490,12 +490,15 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "**2. The Games**\n"
         "Click '🎮 Games' inside a chat to challenge your partner. Both must accept to play.\n\n"
         "**3. Safety First**\n"
-        "• Your identity is hidden.\n"
+        "•End to End Encrypted, Your identity is hidden.\n"
         "• To leave: Click '🛑 Stop'.\n"
-        "• To report abuse: Click '⚠️ Report' after ending chat.\n\n"
+	"• To change Profile: Click '⚙️ Settings'.\n"
+	"• View your Profile: Click '🪪 My ID'.\n"
+        "• To report abuse: Click '⚠️ Report' after ending chat.\n"
+	"• 🛑🛑Behave Respectful to avoid Permanent **BAN**.🛑🛑\n\n"
         "**4. Commands**\n"
         "/start - Restart Bot\n"
-        "/feedback [msg] - Send message to Admin"
+        "/feedback [msg] - Send your feedback to Admin about Bot"
     )
     await update.message.reply_text(msg, parse_mode='Markdown')
 
@@ -518,7 +521,7 @@ async def handle_text_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if text in ["🛑 Stop", "🛑 Stop Chat"]: await stop_chat(update, context); return
     if text == "⏭️ Next": await stop_chat(update, context, is_next=True); return
     if text == "❌ Stop Searching": await stop_search_process(update, context); return
-    if text == "🎯 Change Interests": context.user_data["state"] = "ONBOARDING_INTEREST"; await update.message.reply_text("👇 Type interests:", reply_markup=ReplyKeyboardRemove()); return
+    if text == "🎯 Change Interests": context.user_data["state"] = "ONBOARDING_INTEREST"; await update.message.reply_text("👇 Type interests:(separate two interest with coma)", reply_markup=ReplyKeyboardRemove()); return
     if text == "⚙️ Settings": 
         kb = [
             [InlineKeyboardButton("🚻 Gender", callback_data="set_gen_menu"), InlineKeyboardButton("🎂 Age", callback_data="set_age_menu")],
@@ -574,15 +577,20 @@ async def stop_search_process(update, context):
 
 async def start_search(update, context):
     user_id = update.effective_user.id
-    # Fast Check RAM First
     if user_id in ACTIVE_CHATS:
         await update.message.reply_text("⛔ **Already in chat!**", parse_mode='Markdown'); return
 
     conn = get_conn(); cur = conn.cursor()
     cur.execute("UPDATE users SET status = 'searching' WHERE user_id = %s", (user_id,))
-    conn.commit(); 
+    conn.commit()
     
-    # Fetch interests for UI display
+    # 🔔 NEW: WAKE UP WAITERS
+    cur.execute("SELECT user_id FROM users WHERE status = 'waiting_notify' AND user_id != %s", (user_id,))
+    waiters = cur.fetchall()
+    for w in waiters:
+        try: await context.bot.send_message(w[0], "🔔 **Someone just joined!**\nClick '🚀 Start Matching' now to connect!", parse_mode='Markdown')
+        except: pass
+    
     cur.execute("SELECT interests FROM users WHERE user_id = %s", (user_id,))
     tags = cur.fetchone()[0] or "Any"
     cur.close(); release_conn(conn)
@@ -731,9 +739,19 @@ async def send_reroll_option(context: ContextTypes.DEFAULT_TYPE):
     user_id = context.job.data
     conn = get_conn(); cur = conn.cursor()
     cur.execute("SELECT status FROM users WHERE user_id = %s", (user_id,))
-    if cur.fetchone()[0] == 'searching':
-        kb = [[InlineKeyboardButton("🎲 Try Random", callback_data="force_random")]]
-        try: await context.bot.send_message(user_id, "🐢 **Quiet...**", reply_markup=InlineKeyboardMarkup(kb))
+    status = cur.fetchone()
+    
+    # Only show if they are STILL searching
+    if status and status[0] == 'searching':
+        kb = [[InlineKeyboardButton("🔔 Notify Me", callback_data="notify_me"), InlineKeyboardButton("❌ Stop", callback_data="stop_search")]]
+        msg = (
+            "🐢 **It's quiet right now.**\n"
+            "Want me to notify you when someone joins?\n\n"
+            "_This is temporary because our bot is in the initial stage. "
+            "When userbase increases, you will get connected immediately. "
+            "Thanks for supporting!_"
+        )
+        try: await context.bot.send_message(user_id, msg, reply_markup=InlineKeyboardMarkup(kb), parse_mode='Markdown')
         except: pass
     cur.close(); release_conn(conn)
 
@@ -747,7 +765,7 @@ async def show_profile(update, context):
 
 async def show_main_menu(update):
     try: 
-        if update.message: await update.message.reply_text("👋 **Welcome to OmeTV Chatbot...**", reply_markup=get_keyboard_lobby(), parse_mode='Markdown')
+        if update.message: await update.message.reply_text("👋 **Welcome to OmeTV Chatbot 🤖**", reply_markup=get_keyboard_lobby(), parse_mode='Markdown')
         elif update.callback_query: await update.callback_query.message.reply_text("👋 **Lobby**", reply_markup=get_keyboard_lobby(), parse_mode='Markdown')
     except: pass
 
@@ -788,6 +806,13 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if data == "set_mood_menu": await send_onboarding_step(update, 5); return
     if data == "force_random": await perform_match(update, context, uid); return
     if data == "close_settings": await q.delete_message(); return
+    # NOTIFY ME LOGIC
+    if data == "notify_me":
+        conn = get_conn(); cur = conn.cursor()
+        cur.execute("UPDATE users SET status = 'waiting_notify' WHERE user_id = %s", (uid,))
+        conn.commit(); cur.close(); release_conn(conn)
+        await q.edit_message_text("✅ **Done.** I will message you the second someone comes online.", parse_mode='Markdown')
+        return
     if data == "game_soon": await q.answer("🚧 Coming Soon!", show_alert=True); return
     
     # GAME HANDLERS
@@ -871,8 +896,8 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             # 4. Check Tournament Status
             if gd["cur_r"] >= gd["max_r"]:
                 # GAME OVER - FINAL RESULTS
-                final_res = "🤝 **MATCH DRAW!**"
-                if sc_me > sc_pa: final_res = "🏆 **YOU WON THE MATCH!**"
+                final_res = "aww...🤝 **MATCH DRAW!**"
+                if sc_me > sc_pa: final_res = "🏆 **YOU WON THE MATCH!🍾**"
                 elif sc_pa > sc_me: final_res = "💀 **YOU LOST THE MATCH!**"
                 
                 p_final = "🏆 **YOU WON THE MATCH!**" if "LOST" in final_res else ("💀 **YOU LOST THE MATCH!**" if "WON" in final_res else final_res)
