@@ -219,9 +219,22 @@ async def offer_game(update, context, user_id, game_name):
         return
     GAME_COOLDOWNS[user_id] = time.time()
 
+    # 1. DEFINE RULES
+    rules_map = {
+        "Truth or Dare": "• Be honest!\n• You can answer with Text, Voice, or Photos.\n• Use 'Ask Your Own' to get creative.",
+        "Would You Rather": "• Vote silently first.\n• Discuss WHY you chose it.\n• Next round starts only after BOTH answer.",
+        "Rock Paper Scissors": "• Pick your move.\n• Best of 3 or 5 wins.\n• Draws restart the round instantly."
+    }
+    
+    # Smart Lookup (Handles "Rock Paper Scissors|3")
+    rule_text = "Have fun!"
+    if "Truth" in game_name: rule_text = rules_map["Truth or Dare"]
+    elif "Would" in game_name: rule_text = rules_map["Would You Rather"]
+    elif "Rock" in game_name: rule_text = rules_map["Rock Paper Scissors"]
+
     # Suggestion Logic
     all_games = ["Truth or Dare", "Would You Rather", "Rock Paper Scissors"]
-    suggestions = [g for g in all_games if g != game_name]
+    suggestions = [g for g in all_games if g not in game_name] # Loose match
     
     kb = [
         [InlineKeyboardButton("✅ Accept", callback_data=f"game_accept_{game_name}"), InlineKeyboardButton("❌ Reject", callback_data="game_reject")],
@@ -229,8 +242,9 @@ async def offer_game(update, context, user_id, game_name):
          InlineKeyboardButton(f"💡 Suggest {suggestions[1]}", callback_data=f"game_offer_{suggestions[1]}")]
     ]
     
-    await context.bot.send_message(user_id, f"🎮 **Offered {game_name}**\nWaiting for partner...", parse_mode='Markdown')
-    await context.bot.send_message(partner_id, f"🎮 **Game Request**\nPartner wants to play **{game_name}**.", reply_markup=InlineKeyboardMarkup(kb), parse_mode='Markdown')
+    # 2. SEND WITH RULES
+    await context.bot.send_message(user_id, f"🎮 **Offered: {game_name}**\n\n📜 **How to Play:**\n{rule_text}\n\n⏳ Waiting for partner...", parse_mode='Markdown')
+    await context.bot.send_message(partner_id, f"🎮 **Game Request**\nPartner wants to play **{game_name}**.\n\n📜 **How to Play:**\n{rule_text}", reply_markup=InlineKeyboardMarkup(kb), parse_mode='Markdown')
 
 async def start_game_session(update, context, game_raw, p1, p2):
     # Detect Rounds (Format: "RPS|3")
@@ -324,8 +338,16 @@ async def admin_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
         cur.execute(f"SELECT {col}, COUNT(*) FROM users GROUP BY {col} ORDER BY COUNT(*) DESC LIMIT 3")
         return " | ".join([f"{r[0]}:{r[1]}" for r in cur.fetchall()])
 
-    msg = (f"👮 **CONTROL ROOM**\n👥 Total: `{total}` | 🟢 Online: `{online}`\n⚠️ Flagged: `{flagged}`\n\n"
-           f"🚻 **Gender:** {g_stats}\n🌍 {get_stat('region')}\n🗣️ {get_stat('language')}")
+    msg = (f"👮 **CONTROL ROOM**\n"
+           f"👥 Total: `{total}` | 🟢 Online: `{online}`\n"
+           f"⚠️ Flagged: `{flagged}`\n"
+           f"🚻 **Gender:** {g_stats}\n"
+           f"🌍 {get_stat('region')}\n\n"
+           f"🛠️ **COMMANDS:**\n"
+           f"• `/ban ID HOURS` (e.g., /ban 12345 24)\n"
+           f"• `/warn ID REASON` (e.g., /warn 12345 No spam)\n"
+           f"• `/broadcast MESSAGE` (Send to all)\n"
+           f"• `/unban ID` (Via button only)")
     
     kb = [[InlineKeyboardButton("📢 Broadcast", callback_data="admin_broadcast_info"), InlineKeyboardButton("📜 Recent Users", callback_data="admin_users")],
           [InlineKeyboardButton("⚠️ Reports", callback_data="admin_reports"), InlineKeyboardButton("📨 Feedbacks", callback_data="admin_feedbacks")],
@@ -461,7 +483,21 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await show_main_menu(update)
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("🆘 **HELP**\n\n🚀 Start: Match\n🛑 Stop: End\n📨 Feedback: `/feedback msg`", parse_mode='Markdown')
+    msg = (
+        "🆘 **USER GUIDE**\n\n"
+        "**1. How to Chat?**\n"
+        "Click '🚀 Start Matching'. You will be connected to a random stranger. Say Hi!\n\n"
+        "**2. The Games**\n"
+        "Click '🎮 Games' inside a chat to challenge your partner. Both must accept to play.\n\n"
+        "**3. Safety First**\n"
+        "• Your identity is hidden.\n"
+        "• To leave: Click '🛑 Stop'.\n"
+        "• To report abuse: Click '⚠️ Report' after ending chat.\n\n"
+        "**4. Commands**\n"
+        "/start - Restart Bot\n"
+        "/feedback [msg] - Send message to Admin"
+    )
+    await update.message.reply_text(msg, parse_mode='Markdown')
 
 async def handle_text_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message: return
@@ -570,7 +606,7 @@ async def perform_match(update, context, user_id):
         # DESIGN RESTORED
         common_str = ", ".join(common).title() if common else "Random"
         msg = (f"⚡ **YOU ARE CONNECTED!**\n\n🎭 **Mood:** {p_mood}\n🔗 **Interest:** {common_str}\n"
-               f"🗣️ **Lang:** {p_lang}\n\n⚠️ *Tip: Say Hi!*")
+               f"🗣️ **Lang:** {p_lang}\n\n⚠️ *Tip: Say Hi! or Sent a meme*")
         
         kb = get_keyboard_chat()
         await context.bot.send_message(user_id, msg, reply_markup=kb, parse_mode='Markdown')
@@ -605,16 +641,16 @@ async def stop_chat(update, context, is_next=False):
     
     if is_next:
         await update.message.reply_text("⏭️ **Skipping...**", reply_markup=ReplyKeyboardRemove(), parse_mode='Markdown')
-        await update.message.reply_text("📊 Feedback?", reply_markup=InlineKeyboardMarkup(k_me))
+        await update.message.reply_text("Please give your Feedback about the Stranger!!", reply_markup=InlineKeyboardMarkup(k_me))
         await start_search(update, context)
     else:
-        await update.message.reply_text("🔌 **Disconnected.**", reply_markup=get_keyboard_lobby(), parse_mode='Markdown')
-        await update.message.reply_text("📊 Feedback?", reply_markup=InlineKeyboardMarkup(k_me))
+        await update.message.reply_text("😶‍🌫️ **Partner Disconnect.**", reply_markup=get_keyboard_lobby(), parse_mode='Markdown')
+        await update.message.reply_text("Please give your Feedback about the Stranger!!", reply_markup=InlineKeyboardMarkup(k_me))
 
     if partner_id:
         try: 
-            await context.bot.send_message(partner_id, "🔌 **Partner Disconnected.**", reply_markup=get_keyboard_lobby(), parse_mode='Markdown')
-            await context.bot.send_message(partner_id, "📊 Feedback?", reply_markup=InlineKeyboardMarkup(k_partner))
+            await context.bot.send_message(partner_id, "😶‍🌫️ **Partner Disconnected.**", reply_markup=get_keyboard_lobby(), parse_mode='Markdown')
+            await context.bot.send_message(partner_id, "Please give your Feedback about the Stranger!!", reply_markup=InlineKeyboardMarkup(k_partner))
         except: pass
 
 async def relay_message(update, context):
@@ -711,7 +747,7 @@ async def show_profile(update, context):
 
 async def show_main_menu(update):
     try: 
-        if update.message: await update.message.reply_text("👋 **Lobby**", reply_markup=get_keyboard_lobby(), parse_mode='Markdown')
+        if update.message: await update.message.reply_text("👋 **Welcome to OmeTV Chatbot...**", reply_markup=get_keyboard_lobby(), parse_mode='Markdown')
         elif update.callback_query: await update.callback_query.message.reply_text("👋 **Lobby**", reply_markup=get_keyboard_lobby(), parse_mode='Markdown')
     except: pass
 
@@ -742,7 +778,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     data = q.data
 # RPS SUB-MENU
     if data == "rps_mode_select":
-        kb = [[InlineKeyboardButton("Best of 3", callback_data="game_offer_RPS|3"), InlineKeyboardButton("Best of 5", callback_data="game_offer_RPS|5")]]
+        kb = [[InlineKeyboardButton("Best of 3", callback_data="game_offer_Rock paper Scissors|3"), InlineKeyboardButton("Best of 5", callback_data="game_offer_Rock paper Scissors|5")]]
         await q.edit_message_text("🔢 **Select Rounds:**", reply_markup=InlineKeyboardMarkup(kb)); return
     uid = q.from_user.id
     # NEW SETTINGS REDIRECTS
@@ -1029,5 +1065,5 @@ if __name__ == '__main__':
         app.add_handler(CallbackQueryHandler(button_handler))
         app.add_handler(MessageHandler(filters.ALL, relay_message))
         
-        print("🤖 PHASE 15 BOT LIVE")
+        print("🤖 PHASE 20 BOT LIVE")
         app.run_polling()
