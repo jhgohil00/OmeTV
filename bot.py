@@ -285,7 +285,8 @@ async def send_tod_options(context, target_id, mode):
     GAME_STATES[target_id]["options"] = options
         
     # Send to the Partner (Asker)
-    await context.bot.send_message(target_id, msg_text, reply_markup=InlineKeyboardMarkup(kb), parse_mode='Markdown')
+    menu = await context.bot.send_message(target_id, msg_text, reply_markup=InlineKeyboardMarkup(kb), parse_mode='Markdown')
+    if target_id in GAME_STATES: GAME_STATES[target_id]["menu_id"] = menu.message_id
 async def send_wyr_round(context, p1, p2):
     q = random.choice(GAME_DATA["wyr"])
     
@@ -551,12 +552,17 @@ async def start_search(update, context):
     tags = cur.fetchone()[0] or "Any"
     cur.close(); release_conn(conn)
     
-    await update.message.reply_text(f"📡 **Scanning...**\nLooking for: `{tags}`...", parse_mode='Markdown', reply_markup=get_keyboard_searching())
+    scan_msg = await update.message.reply_text(f"📡 **Scanning...**\nLooking for: `{tags}`...", parse_mode='Markdown', reply_markup=get_keyboard_searching())
+    context.user_data["scan_id"] = scan_msg.message_id
     if context.job_queue: context.job_queue.run_once(send_reroll_option, 15, data=user_id)
     await perform_match(update, context, user_id)
 
 async def perform_match(update, context, user_id):
     partner_id, common, p_mood, p_lang = find_match(user_id)
+    # CLEANUP SCANNING
+    if "scan_id" in context.user_data:
+        try: await context.bot.delete_message(chat_id=user_id, message_id=context.user_data["scan_id"])
+        except: pass
     if partner_id:
         conn = get_conn(); cur = conn.cursor()
         cur.execute("UPDATE users SET status='chatting', partner_id=%s WHERE user_id=%s", (partner_id, user_id))
@@ -775,6 +781,10 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     if data.startswith("tod_send_"): 
         gd = GAME_STATES.get(uid)
+        # CLEANUP MENU
+        if gd and "menu_id" in gd:
+            try: await context.bot.delete_message(chat_id=uid, message_id=gd["menu_id"])
+            except: pass
         if gd and "options" in gd:
             q_text = gd["options"][int(data.split("_")[2])]
             partner_id = ACTIVE_CHATS.get(uid) # The Answerer
