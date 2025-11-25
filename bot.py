@@ -547,14 +547,24 @@ async def handle_text_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if pid: await context.bot.send_message(pid, "🛑 Partner stopped game.", reply_markup=get_keyboard_chat())
         return
 
-    # 6. COMMANDS
+    # 6. COMMANDS (Robust & Clean)
     if text.startswith("/"):
-        if text == "/stop": await stop_chat(update, context); return
-        if text == "/admin": await admin_panel(update, context); return
-        if text.startswith("/ban"): await admin_ban_command(update, context); return
-        if text.startswith("/warn"): await admin_warn_command(update, context); return
-        if text.startswith("/broadcast"): await admin_broadcast_execute(update, context); return
-        if text.startswith("/feedback"): await handle_feedback_command(update, context); return
+        cmd = text.lower().strip() # Fixes "Stop" or "/stop "
+        
+        # User Commands
+        if cmd == "/stop": 
+            await stop_chat(update, context)
+            return
+        if cmd == "/next": 
+            await stop_chat(update, context, is_next=True)
+            return
+        
+        # Admin Commands
+        if cmd == "/admin": await admin_panel(update, context); return
+        if cmd.startswith("/ban"): await admin_ban_command(update, context); return
+        if cmd.startswith("/warn"): await admin_warn_command(update, context); return
+        if cmd.startswith("/broadcast"): await admin_broadcast_execute(update, context); return
+        if cmd.startswith("/feedback"): await handle_feedback_command(update, context); return
 
     await relay_message(update, context)
 # ==============================================================================
@@ -637,15 +647,17 @@ async def stop_chat(update, context, is_next=False):
     cur.execute("UPDATE users SET status='idle', partner_id=0 WHERE user_id IN (%s, %s)", (user_id, partner_id))
     conn.commit(); cur.close(); release_conn(conn)
     
-    # 1. KEYBOARD FOR ME (Rate Partner)
-    k_me = [[InlineKeyboardButton("👍", callback_data=f"rate_like_{partner_id}"), InlineKeyboardButton("👎", callback_data=f"rate_dislike_{partner_id}")],
-            [InlineKeyboardButton("⚠️ Report", callback_data=f"rate_report_{partner_id}")],
-            [InlineKeyboardButton("🚀 New Match", callback_data="action_search"), InlineKeyboardButton("🏠 Menu", callback_data="main_menu")]]
+    # 1. KEYBOARD FOR ME
+    k_me = [
+        [InlineKeyboardButton("👍", callback_data=f"rate_like_{partner_id}"), InlineKeyboardButton("👎", callback_data=f"rate_dislike_{partner_id}")],
+        [InlineKeyboardButton("⚠️ Report", callback_data=f"rate_report_{partner_id}")]
+    ]
     
-    # 2. KEYBOARD FOR PARTNER (Rate Me) - NEW
-    k_partner = [[InlineKeyboardButton("👍", callback_data=f"rate_like_{user_id}"), InlineKeyboardButton("👎", callback_data=f"rate_dislike_{user_id}")],
-                 [InlineKeyboardButton("⚠️ Report", callback_data=f"rate_report_{user_id}")],
-                 [InlineKeyboardButton("🚀 New Match", callback_data="action_search"), InlineKeyboardButton("🏠 Menu", callback_data="main_menu")]]
+    # 2. KEYBOARD FOR PARTNER
+    k_partner = [
+        [InlineKeyboardButton("👍", callback_data=f"rate_like_{user_id}"), InlineKeyboardButton("👎", callback_data=f"rate_dislike_{user_id}")],
+        [InlineKeyboardButton("⚠️ Report", callback_data=f"rate_report_{user_id}")]
+    ]
     
     if is_next:
         await update.message.reply_text("⏭️ **Skipping...**", reply_markup=ReplyKeyboardRemove(), parse_mode='Markdown')
@@ -678,36 +690,37 @@ async def relay_message(update, context):
             ACTIVE_CHATS[user_id] = partner_id # Repopulate RAM
 
     if partner_id:
-        # 🔵 WYR DISCUSSION PHASE (PHASE 18)
+        # 🔵 WYR DISCUSSION PHASE
         if user_id in GAME_STATES and GAME_STATES[user_id].get("status") == "discussing":
             gd = GAME_STATES[user_id]
-            
-            # 1. Forward the Explanation
             try:
+                # 1. Forward Explanation
                 await update.message.copy(chat_id=partner_id, caption=f"🗣️ **Because...**")
                 await update.message.reply_text("✅ Explanation Sent.")
                 
-                # 2. Mark this user as "Explained"
+                # 2. Mark Explained
                 if "explained" not in gd: gd["explained"] = []
                 if user_id not in gd["explained"]: gd["explained"].append(user_id)
                 
-                # 3. Check if BOTH have explained
+                # 3. Check if BOTH explained
                 if len(gd["explained"]) >= 2:
                     await context.bot.send_message(user_id, "✨ **Both explained! Next Round...**")
                     await context.bot.send_message(partner_id, "✨ **Both explained! Next Round...**")
                     
                     # Reset State & Start Next Round
                     gd["status"] = "playing"
+                    gd["explained"] = []
                     await asyncio.sleep(1.5)
+                    # Assuming p1/p2 are stored in 'partner' or we derive them.
+                    # Simple fix: Pass current user and partner
                     await send_wyr_round(context, user_id, partner_id)
-                    
+
             except Exception as e:
                 print(f"WYR Relay Error: {e}")
             return
-        # 🟢 GAME ANSWER LOGIC (MOVED HERE TO SUPPORT MEDIA)
-        # Check if this user is supposed to be answering a question
-        if user_id in GAME_STATES and GAME_STATES[user_id].get("status") == "answering":
-            # Forward the content (Text, Voice, Photo, Video, etc.)
+
+        # 🟢 GAME ANSWER LOGIC (STRICT TURN CHECK)
+        if user_id in GAME_STATES and GAME_STATES[user_id].get("status") == "answering" and GAME_STATES[user_id].get("turn") == user_id:
             try: 
                 await update.message.copy(chat_id=partner_id, caption=f"🗣️ **Answer** (from Game)")
                 await update.message.reply_text("✅ Answer Sent.")
@@ -716,15 +729,18 @@ async def relay_message(update, context):
                 GAME_STATES[user_id]["status"] = "playing"
                 if partner_id in GAME_STATES: GAME_STATES[partner_id]["status"] = "playing"
                 
-                # SWAP TURNS (Now Partner picks Truth/Dare)
+                # SWAP TURNS
+                GAME_STATES[user_id]["turn"] = partner_id 
+                GAME_STATES[partner_id]["turn"] = partner_id
+                
+                # Show Menu to Partner
                 await send_tod_turn(context, partner_id)
-                return # Stop here, don't double send
+                return 
             except Exception as e:
                 print(f"Game Relay Error: {e}")
 
         # NORMAL CHAT RELAY
         if update.message.text:
-            # Log in background (simplified here as synchronous for safety)
             conn = get_conn(); cur = conn.cursor()
             cur.execute("INSERT INTO chat_logs (sender_id, receiver_id, message) VALUES (%s, %s, %s)", (user_id, partner_id, update.message.text))
             conn.commit(); cur.close(); release_conn(conn)
@@ -847,15 +863,19 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     if data.startswith("tod_send_"): 
         gd = GAME_STATES.get(uid)
-        if gd and "options" in gd:
+        if gd:
             q_text = gd["options"][int(data.split("_")[2])]
-            partner_id = ACTIVE_CHATS.get(uid) # The Answerer
+            pid = gd["partner"]
             
-            if partner_id:
-                await context.bot.send_message(partner_id, f"🎲 **QUESTION:**\n{q_text}\n\n*Type your answer...*", parse_mode='Markdown')
-                await q.edit_message_text(f"✅ Asked: {q_text}")
-                # Mark partner as answering
-                if partner_id in GAME_STATES: GAME_STATES[partner_id]["status"] = "answering"
+            # Send Question
+            await context.bot.send_message(pid, f"🎲 **QUESTION:**\n{q_text}\n\n*Type your answer...*", parse_mode='Markdown')
+            await q.edit_message_text(f"✅ Asked: {q_text}")
+            
+            # Update State: It is now PARTNER'S turn to answer. 
+            # We DO NOT send the menu yet. We wait for text input.
+            if pid in GAME_STATES: 
+                GAME_STATES[pid]["status"] = "answering"
+                GAME_STATES[pid]["turn"] = pid 
         return
     if data == "tod_manual": context.user_data["state"] = "GAME_MANUAL"; await q.edit_message_text("✍️ **Type your question now:**"); return
 # ROCK PAPER SCISSORS LOGIC
