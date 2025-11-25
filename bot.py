@@ -1076,7 +1076,7 @@ if __name__ == '__main__':
         init_db()
         flask_thread = threading.Thread(target=run_flask); flask_thread.daemon = True; flask_thread.start()
         req = HTTPXRequest(connect_timeout=60, read_timeout=60)
-        app = ApplicationBuilder().token(BOT_TOKEN).job_queue(None).request(req).build()
+        app = ApplicationBuilder().token(BOT_TOKEN).request(req).build()
         
         app.add_handler(CommandHandler("start", start))
         app.add_handler(CommandHandler("admin", admin_panel))
