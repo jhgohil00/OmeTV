@@ -741,15 +741,16 @@ async def send_reroll_option(context: ContextTypes.DEFAULT_TYPE):
     cur.execute("SELECT status FROM users WHERE user_id = %s", (user_id,))
     status = cur.fetchone()
     
-    # Only show if they are STILL searching
+    # Only show if STILL searching
     if status and status[0] == 'searching':
-        kb = [[InlineKeyboardButton("🔔 Notify Me", callback_data="notify_me"), InlineKeyboardButton("❌ Stop", callback_data="stop_search")]]
+        kb = [
+            [InlineKeyboardButton("🔔 Notify Me & Stop", callback_data="notify_me")],
+            [InlineKeyboardButton("📡 Keep Searching", callback_data="keep_searching")]
+        ]
         msg = (
-            "🐢 **It's quiet right now.**\n"
-            "Want me to notify you when someone joins?\n\n"
-            "_This is temporary because our bot is in the initial stage. "
-            "When userbase increases, you will get connected immediately. "
-            "Thanks for supporting!_"
+            "🐢 **It's quiet right now.**\n\n"
+            "1️⃣ **Notify:** Stop searching. I'll ping you when someone joins.\n"
+            "2️⃣ **Keep Searching:** Stay in the queue."
         )
         try: await context.bot.send_message(user_id, msg, reply_markup=InlineKeyboardMarkup(kb), parse_mode='Markdown')
         except: pass
@@ -807,11 +808,19 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if data == "force_random": await perform_match(update, context, uid); return
     if data == "close_settings": await q.delete_message(); return
     # NOTIFY ME LOGIC
+    # NOTIFY ME LOGIC (Pause & Lobby)
     if data == "notify_me":
         conn = get_conn(); cur = conn.cursor()
         cur.execute("UPDATE users SET status = 'waiting_notify' WHERE user_id = %s", (uid,))
         conn.commit(); cur.close(); release_conn(conn)
-        await q.edit_message_text("✅ **Done.** I will message you the second someone comes online.", parse_mode='Markdown')
+        
+        await q.edit_message_text("✅ **Paused.** I'll notify you when someone joins.", parse_mode='Markdown')
+        await show_main_menu(update) # Force them back to Lobby so they are ready to click Start later
+        return
+
+    # KEEP SEARCHING LOGIC (Continue)
+    if data == "keep_searching":
+        await q.delete_message() # Just delete the warning, stay in queue
         return
     if data == "game_soon": await q.answer("🚧 Coming Soon!", show_alert=True); return
     
@@ -1090,5 +1099,5 @@ if __name__ == '__main__':
         app.add_handler(CallbackQueryHandler(button_handler))
         app.add_handler(MessageHandler(filters.ALL, relay_message))
         
-        print("🤖 PHASE 20 BOT LIVE")
+        print("🤖 PHASE 21 BOT LIVE")
         app.run_polling()
