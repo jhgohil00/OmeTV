@@ -749,8 +749,10 @@ async def send_reroll_option(context: ContextTypes.DEFAULT_TYPE):
         ]
         msg = (
             "🐢 **It's quiet right now.**\n\n"
-            "1️⃣ **Notify:** Stop searching. I'll ping you when someone joins.\n"
-            "2️⃣ **Keep Searching:** Stay in the queue."
+            "Want me to notify you when someone joins?\n\n"
+            "_This is temporary because our bot is in the initial stage. "
+            "When userbase increases, you will get connected immediately. "
+            "Thanks for supporting!_"
         )
         try: await context.bot.send_message(user_id, msg, reply_markup=InlineKeyboardMarkup(kb), parse_mode='Markdown')
         except: pass
@@ -767,7 +769,7 @@ async def show_profile(update, context):
 async def show_main_menu(update):
     try: 
         if update.message: await update.message.reply_text("👋 **Welcome to OmeTV Chatbot 🤖**", reply_markup=get_keyboard_lobby(), parse_mode='Markdown')
-        elif update.callback_query: await update.callback_query.message.reply_text("👋 **Lobby**", reply_markup=get_keyboard_lobby(), parse_mode='Markdown')
+        elif update.callback_query: await update.callback_query.message.reply_text("⏳ **you are in waiting Lobby...Thanks for you patience **", reply_markup=get_keyboard_lobby(), parse_mode='Markdown')
     except: pass
 
 async def handle_report(update, context, reporter, reported):
@@ -1099,5 +1101,5 @@ if __name__ == '__main__':
         app.add_handler(CallbackQueryHandler(button_handler))
         app.add_handler(MessageHandler(filters.ALL, relay_message))
         
-        print("🤖 PHASE 21 BOT LIVE")
+        print("🤖 PHASE 20 BOT LIVE")
         app.run_polling()
