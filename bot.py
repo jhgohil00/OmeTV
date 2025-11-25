@@ -552,10 +552,30 @@ async def handle_text_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
         cmd = text.lower().strip() # Fixes "Stop" or "/stop "
         
         # User Commands
-        if cmd == "/stop": 
-            await stop_chat(update, context)
+        if cmd == "/search":
+            # 1. Check DB for 'searching' status (ACTIVE_CHATS only tracks active chats, not waiters)
+            conn = get_conn(); cur = conn.cursor()
+            cur.execute("SELECT status FROM users WHERE user_id = %s", (user_id,))
+            status_row = cur.fetchone()
+            cur.close(); release_conn(conn)
+            
+            # 2. Logic: If in RAM (Chatting) OR DB says Searching -> Block it
+            if user_id in ACTIVE_CHATS or (status_row and status_row[0] == 'searching'):
+                await update.message.reply_text("⚠️ **User are already in chat** (or connecting).", parse_mode='Markdown')
+            else:
+                await start_search(update, context)
             return
+
+        if cmd == "/stop": 
+            # 1. Logic: If NOT in RAM cache, you aren't chatting
+            if user_id not in ACTIVE_CHATS:
+                await update.message.reply_text("⚠️ **You aren't in any connection rn.**", parse_mode='Markdown')
+            else:
+                await stop_chat(update, context)
+            return
+
         if cmd == "/next": 
+            # 1. Logic: Works exactly like the button (Ends chat -> Starts Search)
             await stop_chat(update, context, is_next=True)
             return
         
