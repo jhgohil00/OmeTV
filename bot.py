@@ -35,6 +35,8 @@ logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s
 # ==============================================================================
 # 1. RAM CACHE: Stores who is chatting with whom. Instant access. 0ms Latency.
 ACTIVE_CHATS = {} 
+# [NEW] Translation Map for Replies
+MESSAGE_MAP = {}
 # --- GAME STATE & DATA ---
 GAME_STATES = {}       # {user_id: {'game': 'tod', 'turn': uid, 'partner': pid}}
 GAME_COOLDOWNS = {}    # {user_id: timestamp}
@@ -657,7 +659,9 @@ async def stop_chat(update, context, is_next=False):
     # Clear RAM Cache immediately
     partner_id = ACTIVE_CHATS.pop(user_id, 0)
     if partner_id and partner_id in ACTIVE_CHATS: del ACTIVE_CHATS[partner_id]
-
+    # [NEW] CLEANUP MESSAGE MAP
+    keys_to_remove = [k for k in MESSAGE_MAP if k[0] in (user_id, partner_id)]
+    for k in keys_to_remove: del MESSAGE_MAP[k]
     # Clear Game States on Disconnect
     if user_id in GAME_STATES: del GAME_STATES[user_id]
     if partner_id in GAME_STATES: del GAME_STATES[partner_id]
@@ -760,13 +764,33 @@ async def relay_message(update, context):
                 print(f"Game Relay Error: {e}")
 
         # NORMAL CHAT RELAY
-        if update.message.text:
-            conn = get_conn(); cur = conn.cursor()
-            cur.execute("INSERT INTO chat_logs (sender_id, receiver_id, message) VALUES (%s, %s, %s)", (user_id, partner_id, update.message.text))
-            conn.commit(); cur.close(); release_conn(conn)
-        
-        try: await update.message.copy(chat_id=partner_id)
-        except: await stop_chat(update, context)
+        if update.message:
+            # 1. Log to DB
+            if update.message.text:
+                conn = get_conn(); cur = conn.cursor()
+                cur.execute("INSERT INTO chat_logs (sender_id, receiver_id, message) VALUES (%s, %s, %s)", (user_id, partner_id, update.message.text))
+                conn.commit(); cur.close(); release_conn(conn)
+            
+            try:
+                # [NEW] CHECK FOR REPLY
+                reply_target_id = None
+                if update.message.reply_to_message:
+                    # Check if user is replying to a message we know about
+                    reply_target_id = MESSAGE_MAP.get((user_id, update.message.reply_to_message.message_id))
+                
+                # [NEW] SEND COPY
+                sent_msg = await update.message.copy(
+                    chat_id=partner_id, 
+                    reply_to_message_id=reply_target_id
+                )
+                
+                # [NEW] SAVE TO MAP
+                if sent_msg:
+                    MESSAGE_MAP[(partner_id, sent_msg.message_id)] = update.message.message_id
+
+            except Exception as e:
+                print(f"Relay Error: {e}")
+                await stop_chat(update, context)
 
 # ==============================================================================
 # 🧩 HELPERS & BUTTON HANDLER
