@@ -219,38 +219,46 @@ async def offer_game(update, context, user_id, game_name):
     partner_id = ACTIVE_CHATS.get(user_id)
     if not partner_id: return
     
-    # Cooldown
+    # [NEW] HANDLE AI PARTNER
+    if isinstance(partner_id, str) and partner_id.startswith("AI_"):
+        # 1. Ask the Ghost Engine (Roll Dice)
+        accept, reply_text = GHOST.decide_game_offer(game_name)
+        
+        # 2. Simulate Delay (Thinking)
+        await context.bot.send_chat_action(chat_id=user_id, action="typing")
+        await asyncio.sleep(2)
+        
+        # 3. AI Replies
+        await context.bot.send_message(user_id, reply_text)
+        
+        # 4. If Accepted, give instructions (But don't start the button engine)
+        if accept:
+            await asyncio.sleep(1)
+            if "Truth" in game_name:
+                await context.bot.send_message(user_id, "🎲 **Game On!**\nSince I can't click buttons, just type your Question or Dare here in the chat!", parse_mode='Markdown')
+            elif "Rock" in game_name:
+                await context.bot.send_message(user_id, "✂️ **Rock Paper Scissors**\n\nType your move: *Rock, Paper, or Scissors*", parse_mode='Markdown')
+        return
+
+    # [EXISTING] HUMAN PARTNER LOGIC
     last = GAME_COOLDOWNS.get(user_id, 0)
     if time.time() - last < 60:
         await context.bot.send_message(user_id, f"⏳ Wait {int(60 - (time.time() - last))}s before sending another request.")
         return
     GAME_COOLDOWNS[user_id] = time.time()
 
-    # 1. DEFINE RULES
     rules_map = {
         "Truth or Dare": "• Be honest!\n• You can answer with Text, Voice, or Photos.\n• Use 'Ask Your Own' to get creative.",
         "Would You Rather": "• Vote silently first.\n• Discuss WHY you chose it.\n• Next round starts only after BOTH answer.",
         "Rock Paper Scissors": "• Pick your move.\n• Best of 3 or 5 wins.\n• Draws restart the round instantly."
     }
     
-    # Smart Lookup (Handles "Rock Paper Scissors|3")
-    rule_text = "Have fun!"
-    if "Truth" in game_name: rule_text = rules_map["Truth or Dare"]
-    elif "Would" in game_name: rule_text = rules_map["Would You Rather"]
-    elif "Rock" in game_name: rule_text = rules_map["Rock Paper Scissors"]
-
-    # Suggestion Logic
-    all_games = ["Truth or Dare", "Would You Rather", "Rock Paper Scissors"]
-    suggestions = [g for g in all_games if g not in game_name] # Loose match
-    
+    rule_text = rules_map.get(game_name.split("|")[0], "Have fun!")
     kb = [
-        [InlineKeyboardButton("✅ Accept", callback_data=f"game_accept_{game_name}"), InlineKeyboardButton("❌ Reject", callback_data="game_reject")],
-        [InlineKeyboardButton(f"💡 Suggest {suggestions[0]}", callback_data=f"game_offer_{suggestions[0]}"),
-         InlineKeyboardButton(f"💡 Suggest {suggestions[1]}", callback_data=f"game_offer_{suggestions[1]}")]
+        [InlineKeyboardButton("✅ Accept", callback_data=f"game_accept_{game_name}"), InlineKeyboardButton("❌ Reject", callback_data="game_reject")]
     ]
     
-    # 2. SEND WITH RULES
-    await context.bot.send_message(user_id, f"🎮 **Offered: {game_name}**\n\n📜 **How to Play:**\n{rule_text}\n\n⏳ Waiting for partner...", parse_mode='Markdown')
+    await context.bot.send_message(user_id, f"🎮 **Offered: {game_name}**\n⏳ Waiting...", parse_mode='Markdown')
     await context.bot.send_message(partner_id, f"🎮 **Game Request**\nPartner wants to play **{game_name}**.\n\n📜 **How to Play:**\n{rule_text}", reply_markup=InlineKeyboardMarkup(kb), parse_mode='Markdown')
 
 async def start_game_session(update, context, game_raw, p1, p2):
@@ -775,31 +783,46 @@ async def relay_message(update, context):
 
     # --- PARTNER IS AI ---
     if isinstance(partner_id, str) and partner_id.startswith("AI_"):
-        # 1. Game Check
-        if update.message and update.message.text in ["😈 Truth or Dare", "🎲 Would You Rather", "✂️ Rock Paper Scissors"]:
-            game_name = update.message.text.replace("😈 ", "").replace("🎲 ", "").replace("✂️ ", "")
-            accept, reply = GHOST.decide_game_offer(game_name)
-            await asyncio.sleep(2)
-            await update.message.reply_text(reply)
+        msg_text = update.message.text
+        
+        # 1. SPECIAL: Handle Rock Paper Scissors via Text
+        if msg_text and msg_text.lower() in ['rock', 'paper', 'scissors']:
+            # AI plays randomly
+            ai_move = random.choice(['rock', 'paper', 'scissors'])
+            user_move = msg_text.lower()
+            
+            # Decide Winner
+            result = "🤝 Draw!"
+            if (user_move == 'rock' and ai_move == 'scissors') or \
+               (user_move == 'paper' and ai_move == 'rock') or \
+               (user_move == 'scissors' and ai_move == 'paper'):
+                result = "🏆 You Win!"
+            elif user_move != ai_move:
+                result = "💀 You Lose!"
+            
+            await asyncio.sleep(1)
+            await update.message.reply_text(f"I picked **{ai_move.title()}**.\n\n{result}", parse_mode='Markdown')
             return
 
-        # 2. Text Processing
-        if update.message and update.message.text:
+        # 2. Normal Text Processing (The existing logic)
+        if msg_text:
+            # ... (Existing process_message logic) ...
             await context.bot.send_chat_action(chat_id=user_id, action="typing")
-            result = await GHOST.process_message(user_id, update.message.text)
+            result = await GHOST.process_message(user_id, msg_text)
             
+            # (Keep your existing TRIGGER handling here)
             if result == "TRIGGER_SKIP" or result == "TRIGGER_INDIAN_MALE_BEG":
-                if result == "TRIGGER_INDIAN_MALE_BEG":
-                    await asyncio.sleep(1); await update.message.reply_text("bro any girls id?")
-                    await asyncio.sleep(2); await update.message.reply_text("give me")
-                    await asyncio.sleep(1)
+                # ... (Handle disconnect) ...
                 await stop_chat(update, context)
                 return
-            
+
             if isinstance(result, dict) and result.get("type") == "text":
                 await asyncio.sleep(result['delay'])
                 await update.message.reply_text(result['content'])
         return
+
+    # --- PARTNER IS HUMAN ---
+    # (Rest of your code remains unchanged)
 
     # --- PARTNER IS HUMAN ---
     # (Original Logic Below)
