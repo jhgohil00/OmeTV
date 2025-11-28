@@ -40,23 +40,41 @@ class GhostEngine:
             );
         """)
         
-        # REMOVED (M)/(F) from labels to allow dynamic selection
-        cur.execute("SELECT COUNT(*) FROM ai_personas")
-        if cur.fetchone()[0] == 0:
-            personas = [
-                ('south_indian', '🇮🇳 South Indian', 'You are an engineering student from Bangalore. Speak English mixed with "Macha", "Da", "Ille". Friendly but defensive. If asked location, say Bangalore or Chennai.'),
-                ('north_indian', '🇮🇳 North Indian', 'You are from Delhi. Speak Hinglish. Aggressive, bored. Use "Bhai", "Kaisa hai", "Kya bolti public". If partner says "M", ask "bhai any girls id?" or disconnect.'),
-                ('indo_teen', '🇮🇩 Indo Teen', 'You are 17 from Jakarta. Use heavy Indo slang: "Wkwkwk", "Sange", "Co/Ce". Ask "Indo?" first. If they say India, say "skip" and disconnect.'),
-                ('american_teen', '🇺🇸 American', 'You are from Florida. Bored, in college. Type lowercase, fast, uses "lol", "idk", "literally". Hates boring people.'),
-                ('indian_girl_sobo', '🇮🇳 Indian (Tier 1)', 'You are from South Mumbai. Speak perfect English. Rich, slightly arrogant. Hate creeps. If someone says "bobs/vegana", roast them: "Ew, learn to spell".'),
-                ('kpop_stan', '🇰🇷/🇵🇭 K-Pop Stan', 'You are 16 from Manila. Obsessed with Korea. Use CAPS. Talk about BTS, Blackpink. Use "Oppa", "Stan", "Crying".'),
-                ('african_bro', '🇳🇬 African', 'You are 22 from Nigeria. Use "My guy", "How far", "Wagwan". Chill vibes. Laughs a lot.')
-            ]
-            for p in personas:
-                cur.execute("INSERT INTO ai_personas (key_name, display_name, system_prompt) VALUES (%s, %s, %s)", p)
+        # DEFINED PERSONAS (The ones you wanted)
+        personas = [
+            ('south_indian', '🇮🇳 South Indian', 'You are an engineering student from Bangalore. Speak English mixed with "Macha", "Da", "Ille". Friendly but defensive. If asked location, say Bangalore or Chennai.'),
+            ('north_indian', '🇮🇳 North Indian', 'You are from Delhi. Speak Hinglish. Aggressive, bored. Use "Bhai", "Kaisa hai", "Kya bolti public". If partner says "M", ask "bhai any girls id?" or disconnect.'),
+            ('indo_teen', '🇮🇩 Indo Teen', 'You are 17 from Jakarta. Use heavy Indo slang: "Wkwkwk", "Sange", "Co/Ce". Ask "Indo?" first. If they say India, say "skip" and disconnect.'),
+            ('american_teen', '🇺🇸 American', 'You are from Florida. Bored, in college. Type lowercase, fast, uses "lol", "idk", "literally". Hates boring people.'),
+            ('indian_girl_sobo', '🇮🇳 Indian (Tier 1)', 'You are from South Mumbai. Speak perfect English. Rich, slightly arrogant. Hate creeps. If someone says "bobs/vegana", roast them: "Ew, learn to spell".'),
+            ('kpop_stan', '🇰🇷/🇵🇭 K-Pop Stan', 'You are 16 from Manila. Obsessed with Korea. Use CAPS. Talk about BTS, Blackpink. Use "Oppa", "Stan", "Crying".'),
+            ('african_bro', '🇳🇬 African', 'You are 22 from Nigeria. Use "My guy", "How far", "Wagwan". Chill vibes. Laughs a lot.')
+        ]
+        
+        # UPSERT (Insert or Update if exists) to ensure your DB has them
+        for p in personas:
+            cur.execute("""
+                INSERT INTO ai_personas (key_name, display_name, system_prompt) 
+                VALUES (%s, %s, %s)
+                ON CONFLICT (key_name) 
+                DO UPDATE SET display_name = EXCLUDED.display_name, system_prompt = EXCLUDED.system_prompt;
+            """, p)
+            
         conn.commit()
         cur.close()
         self.db_pool.putconn(conn)
+
+    # [FIXED] THIS WAS MISSING
+    def pick_random_persona(self):
+        """Selects a random persona for the 15s fallback"""
+        conn = self.db_pool.getconn()
+        cur = conn.cursor()
+        cur.execute("SELECT key_name FROM ai_personas")
+        rows = cur.fetchall()
+        cur.close(); self.db_pool.putconn(conn)
+        
+        if not rows: return "american_teen" # Fallback
+        return random.choice(rows)[0]
 
     def get_personas_list(self):
         conn = self.db_pool.getconn()
@@ -81,8 +99,7 @@ class GhostEngine:
         
         base_prompt = row[0]
         
-        # [NEW] DYNAMIC PROMPT CONSTRUCTION
-        # We inject the AI Gender and the Tone constraints here
+        # DYNAMIC PROMPT CONSTRUCTION
         system_msg = (
             f"IDENTITY: {base_prompt}\n"
             f"YOUR GENDER: {ai_gender}\n"
@@ -101,17 +118,26 @@ class GhostEngine:
         }
         return True
 
+    def is_suspicious(self, text):
+        """Checks if user knows it's a bot"""
+        triggers = ["bot", "ai", "chatgpt", "fake", "automated", "robot", "groq", "gemini", "program"]
+        return any(t in text.lower() for t in triggers)
+
     async def process_message(self, user_id, text):
         session = AI_SESSIONS.get(user_id)
         if not session: return None
 
-        persona = session['persona']
-        text_lower = text.strip().lower()
+        # 1. SURVIVAL CHECK
+        if self.is_suspicious(text):
+            return "TRIGGER_SKIP"
 
-        # LOGIC TRIGGERS
+        # 2. LOGIC TRIGGERS
+        persona = session['persona']
+        text_lower = text.lower()
+        
         if persona == 'north_indian' and text_lower in ['m', 'male']:
             return "TRIGGER_INDIAN_MALE_BEG"
-        if persona == 'indo_teen' and ('india' in text_lower or 'indian' in text_lower):
+        if persona == 'indo_teen' and 'india' in text_lower:
             return "TRIGGER_SKIP"
 
         try:
@@ -124,7 +150,7 @@ class GhostEngine:
                 return CLIENT.chat.completions.create(
                     messages=messages,
                     model="llama-3.3-70b-versatile", 
-                    temperature=0.6, # Lower temp = Less "Crazy/Extra"
+                    temperature=0.6,
                     max_tokens=150
                 )
             
@@ -134,16 +160,19 @@ class GhostEngine:
             session['history'].append({"role": "user", "content": text})
             session['history'].append({"role": "assistant", "content": ai_text})
 
-            # [NEW] SLOW LATENCY (REALISM)
-            # Base reaction (1.5s) + Typing time (0.08s per character)
-            # Example: "lol" = 1.7s. "I dont know man" = 3s.
+            # SLOW LATENCY
             wait_time = 1.5 + (len(ai_text) * 0.08)
-            wait_time = min(wait_time, 8.0) # Cap at 8 seconds
+            wait_time = min(wait_time, 8.0) 
             
             return {"type": "text", "content": ai_text, "delay": wait_time}
             
         except Exception as e:
-            return {"type": "error", "content": f"⚠️ Groq Error: {str(e)[:50]}"}
+            return {"type": "error", "content": f"Groq Error: {str(e)[:50]}"}
+
+    def decide_game_offer(self, game_name):
+        if random.random() < 0.20:
+            return False, "nah im good"
+        return True, "sure lol you start"
 
     def save_feedback(self, user_id, user_input, ai_response, rating):
         session = AI_SESSIONS.get(user_id)
