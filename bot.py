@@ -612,7 +612,8 @@ async def check_and_connect_ghost(context: ContextTypes.DEFAULT_TYPE):
         persona = GHOST.pick_random_persona()
         user_ctx = {'gender': job_data['gender'], 'country': job_data['region']}
         
-        success = await GHOST.start_chat(user_id, persona, user_ctx)
+        # [FIXED LINE BELOW] Added "Hidden" as the 3rd argument (ai_gender)
+        success = await GHOST.start_chat(user_id, persona, "Hidden", user_ctx)
         
         if success:
             # SHADOW MODE: We update RAM to AI, but keep DB as 'searching'.
