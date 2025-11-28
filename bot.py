@@ -765,6 +765,33 @@ async def relay_message(update, context):
 
         # NORMAL CHAT RELAY
         if update.message:
+            # [NEW] VIEW ONCE MEDIA CHECK
+            if update.message.photo or update.message.video or update.message.video_note or update.message.voice:
+                duration = 0
+                caption = "📸 Photo"
+                if update.message.video:
+                    caption = "📹 Video"
+                    duration = update.message.video.duration or 0
+                elif update.message.voice:
+                    caption = "🗣️ Voice"
+                    duration = update.message.voice.duration or 0
+                elif update.message.video_note:
+                    caption = "⏺ Circle Video"
+                    duration = update.message.video_note.duration or 0
+                
+                # Smart Duration in callback: secret_uid_msgid_duration
+                callback_data = f"secret_{user_id}_{update.message.message_id}_{duration}"
+                kb = [[InlineKeyboardButton(f"🔓 View {caption}", callback_data=callback_data)]]
+                
+                await context.bot.send_message(
+                    partner_id, 
+                    f"🔒 **Secret {caption} Received!**\nUser sent a self-destructing media.\nTap below to view it.\n_You cannot screenshot or save this._", 
+                    reply_markup=InlineKeyboardMarkup(kb), 
+                    parse_mode='Markdown'
+                )
+                await update.message.reply_text(f"🔒 **Sent as View Once.**\nPartner can view it one time.")
+                return 
+
             # 1. Log to DB
             if update.message.text:
                 conn = get_conn(); cur = conn.cursor()
@@ -862,6 +889,37 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         kb = [[InlineKeyboardButton("Best of 3", callback_data="game_offer_Rock paper Scissors|3"), InlineKeyboardButton("Best of 5", callback_data="game_offer_Rock paper Scissors|5")]]
         await q.edit_message_text("🔢 **Select Rounds:**", reply_markup=InlineKeyboardMarkup(kb)); return
     uid = q.from_user.id
+    # [NEW] SECRET MEDIA HANDLER
+    if data.startswith("secret_"):
+        try:
+            _, sender_id, msg_id, duration_str = data.split("_")
+            sender_id = int(sender_id)
+            msg_id = int(msg_id)
+            duration = int(duration_str)
+            
+            # Timeout: 15s for photos, (Duration + 30s) for videos
+            timeout = 15 if duration == 0 else (duration + 30)
+            
+            await q.edit_message_text(f"🔓 **Open for {timeout}s...**")
+            
+            sent_media = await context.bot.copy_message(
+                chat_id=uid, 
+                from_chat_id=sender_id, 
+                message_id=msg_id, 
+                protect_content=True, # BLOCKS SCREENSHOTS
+                caption=f"⏱️ **Self-Destructing in {timeout}s...**",
+                parse_mode='Markdown'
+            )
+            
+            # Non-blocking wait
+            await asyncio.sleep(timeout)
+            
+            await context.bot.delete_message(chat_id=uid, message_id=sent_media.message_id)
+            await context.bot.send_message(uid, "💣 **Media Destroyed.**")
+        except Exception as e:
+            try: await q.edit_message_text("❌ **Expired or Error.**")
+            except: pass
+        return
     # NEW SETTINGS REDIRECTS
     if data == "set_gen_menu": await send_onboarding_step(update, 1); return
     if data == "set_age_menu": await send_onboarding_step(update, 2); return
