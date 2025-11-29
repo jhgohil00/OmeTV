@@ -617,15 +617,15 @@ async def check_and_connect_ghost(context: ContextTypes.DEFAULT_TYPE):
     
     # Only connect AI if user is STILL searching
     if status and status[0] == 'searching':
-        persona = GHOST.pick_random_persona()
+        # Ensure GhostEngine has this method (Update ghost_engine.py if this errors)
+        persona = GHOST.pick_random_persona() 
+        
         user_ctx = {'gender': job_data['gender'], 'country': job_data['region']}
         
-        # [FIXED LINE BELOW] Added "Hidden" as the 3rd argument (ai_gender)
+        # [FIXED LINE] Added "Hidden" as the 3rd argument
         success = await GHOST.start_chat(user_id, persona, "Hidden", user_ctx)
         
         if success:
-            # SHADOW MODE: We update RAM to AI, but keep DB as 'searching'.
-            # This allows real humans to 'steal' this user later.
             ACTIVE_CHATS[user_id] = f"AI_{persona}"
             
             msg = (f"⚡ **PARTNER FOUND!**\n\n"
