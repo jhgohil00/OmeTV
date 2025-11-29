@@ -738,12 +738,7 @@ async def start_search(update, context):
             return # Exit function, we are connected.
 
     # If we are here, either no match found OR we just kicked a user and are waiting for them to re-join.
-    # 2. Schedule AI Fallback (15s)
-    context.job_queue.run_once(
-        check_and_connect_ghost, 
-        15, 
-        data={'uid': user_id, 'gender': u_gender, 'region': u_region}
-    )
+
         # 2. Schedule AI Fallback (15s)
         context.job_queue.run_once(
             check_and_connect_ghost, 
