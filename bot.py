@@ -702,8 +702,48 @@ async def start_search(update, context):
     partner_id, common, p_mood, p_lang = find_match(user_id)
     
     if partner_id:
-        await connect_users(context, user_id, partner_id, common, p_mood, p_lang)
-    else:
+        # [NEW] KICK LOGIC
+        # Check if the found partner is currently chatting with an AI
+        partner_chat_state = ACTIVE_CHATS.get(partner_id)
+        
+        if isinstance(partner_chat_state, str) and partner_chat_state.startswith("AI_"):
+            # The partner is with AI. We FORCE DISCONNECT them.
+            # 1. Remove AI from their RAM
+            del ACTIVE_CHATS[partner_id]
+            
+            # 2. Set their DB to Idle
+            conn = get_conn(); cur = conn.cursor()
+            cur.execute("UPDATE users SET status='idle' WHERE user_id = %s", (partner_id,))
+            conn.commit(); cur.close(); release_conn(conn)
+            
+            # 3. Send them the "Disconnected" screen with buttons
+            # This makes them think the 'stranger' left. They must click Start again.
+            kb_feedback = [
+                [InlineKeyboardButton("👍", callback_data=f"rate_like_AI"), InlineKeyboardButton("👎", callback_data=f"rate_dislike_AI")],
+                [InlineKeyboardButton("⚠️ Report", callback_data=f"rate_report_AI")]
+            ]
+            try:
+                await context.bot.send_message(partner_id, "😶‍🌫️ **Partner Disconnected.**", reply_markup=get_keyboard_lobby(), parse_mode='Markdown')
+                await context.bot.send_message(partner_id, "Rate Stranger:", reply_markup=InlineKeyboardMarkup(kb_feedback))
+            except: pass
+            
+            # 4. DO NOT CONNECT YET.
+            # User B (You) stays in "Searching..." mode.
+            # When User A clicks "Start Matching", they will find User B immediately.
+            # We fall through to the 'else' block below to schedule the AI timer for User B just in case User A leaves.
+            pass 
+        else:
+            # Partner is truly waiting. Connect immediately.
+            await connect_users(context, user_id, partner_id, common, p_mood, p_lang)
+            return # Exit function, we are connected.
+
+    # If we are here, either no match found OR we just kicked a user and are waiting for them to re-join.
+    # 2. Schedule AI Fallback (15s)
+    context.job_queue.run_once(
+        check_and_connect_ghost, 
+        15, 
+        data={'uid': user_id, 'gender': u_gender, 'region': u_region}
+    )
         # 2. Schedule AI Fallback (15s)
         context.job_queue.run_once(
             check_and_connect_ghost, 
@@ -817,8 +857,31 @@ async def relay_message(update, context):
                 return
 
             if isinstance(result, dict) and result.get("type") == "text":
+                reply_text = result['content']
+                
+                # [NEW] KEYWORD SCANNER (The Doorman)
+                # If AI wants to leave, we execute the /stop command for them.
+                triggers = ["bye", "skip", "stop", "boring", "bsdk", "hat", "leave", "gtg"]
+                # Check if any trigger word is in the reply (word boundaries)
+                is_leaving = any(f" {t} " in f" {reply_text.lower()} " for t in triggers)
+                
+                # Add a random 5% chance to just ghost without saying anything
+                is_ghosting = random.random() < 0.05
+
+                if is_leaving or is_ghosting:
+                    # Send the "Bye" message first (if not ghosting)
+                    if not is_ghosting:
+                        await asyncio.sleep(result['delay'])
+                        await update.message.reply_text(reply_text)
+                    
+                    # Then kill the chat
+                    await asyncio.sleep(1) 
+                    await stop_chat(update, context)
+                    return
+
+                # Normal Reply
                 await asyncio.sleep(result['delay'])
-                await update.message.reply_text(result['content'])
+                await update.message.reply_text(reply_text)
         return
 
     # --- PARTNER IS HUMAN ---
