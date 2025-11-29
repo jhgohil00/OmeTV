@@ -605,24 +605,26 @@ async def handle_text_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ==============================================================================
 # 🔌 FAST CONNECTION LOGIC (RAM + DB)
 # ==============================================================================
-async def check_and_connect_ghost(context: ContextTypes.DEFAULT_TYPE):
-    """Called after 15s. If still searching, connect AI (Shadow Mode)."""
-    job_data = context.job.data
-    user_id = job_data['uid']
+async def execute_ghost_search(context, user_id, u_gender, u_region):
+    """Waits 15s and connects AI if user is still searching."""
+    await asyncio.sleep(15)  # ⏳ THE 15 SECOND WAIT
     
-    conn = get_conn(); cur = conn.cursor()
+    # 1. Check DB: Is user still searching?
+    conn = get_conn()
+    if not conn: return
+    cur = conn.cursor()
     cur.execute("SELECT status FROM users WHERE user_id = %s", (user_id,))
     status = cur.fetchone()
-    cur.close(); release_conn(conn)
+    cur.close()
+    release_conn(conn)
     
-    # Only connect AI if user is STILL searching
+    # 2. Connect if still searching
     if status and status[0] == 'searching':
-        # Ensure GhostEngine has this method (Update ghost_engine.py if this errors)
+        # Pick Persona
         persona = GHOST.pick_random_persona() 
+        user_ctx = {'gender': u_gender, 'country': u_region}
         
-        user_ctx = {'gender': job_data['gender'], 'country': job_data['region']}
-        
-        # [FIXED LINE] Added "Hidden" as the 3rd argument
+        # Start AI Session
         success = await GHOST.start_chat(user_id, persona, "Hidden", user_ctx)
         
         if success:
@@ -632,7 +634,11 @@ async def check_and_connect_ghost(context: ContextTypes.DEFAULT_TYPE):
                    f"🎭 **Mood:** Random\n"
                    f"🗣️ **Lang:** Mixed\n\n"
                    f"⚠️ *Say Hi!*")
-            await context.bot.send_message(user_id, msg, reply_markup=get_keyboard_chat(), parse_mode='Markdown')
+            
+            try:
+                await context.bot.send_message(user_id, msg, reply_markup=get_keyboard_chat(), parse_mode='Markdown')
+            except Exception as e:
+                print(f"❌ Ghost Error: {e}")
 
 async def connect_users(context, user_id, partner_id, common, p_mood, p_lang):
     """Connects two humans, interrupting AI if necessary."""
@@ -680,6 +686,8 @@ async def stop_search_process(update, context):
 
 async def start_search(update, context):
     user_id = update.effective_user.id
+    
+    # Check RAM Cache first
     if user_id in ACTIVE_CHATS:
         await update.message.reply_text("⛔ **Already in chat!**", parse_mode='Markdown'); return
 
@@ -698,26 +706,19 @@ async def start_search(update, context):
     # Notify User
     await update.message.reply_text(f"📡 **Scanning...**\nLooking for: `{tags}`...", parse_mode='Markdown', reply_markup=get_keyboard_searching())
     
-    # 1. Try Instant Match
+    # 1. Try Instant Match (Human)
     partner_id, common, p_mood, p_lang = find_match(user_id)
     
     if partner_id:
-        # [NEW] KICK LOGIC
-        # Check if the found partner is currently chatting with an AI
+        # Check if partner is with AI, kick them if so
         partner_chat_state = ACTIVE_CHATS.get(partner_id)
-        
         if isinstance(partner_chat_state, str) and partner_chat_state.startswith("AI_"):
-            # The partner is with AI. We FORCE DISCONNECT them.
-            # 1. Remove AI from their RAM
             del ACTIVE_CHATS[partner_id]
-            
-            # 2. Set their DB to Idle
             conn = get_conn(); cur = conn.cursor()
             cur.execute("UPDATE users SET status='idle' WHERE user_id = %s", (partner_id,))
             conn.commit(); cur.close(); release_conn(conn)
             
-            # 3. Send them the "Disconnected" screen with buttons
-            # This makes them think the 'stranger' left. They must click Start again.
+            # Send Disconnect screen to the person who was talking to AI
             kb_feedback = [
                 [InlineKeyboardButton("👍", callback_data=f"rate_like_AI"), InlineKeyboardButton("👎", callback_data=f"rate_dislike_AI")],
                 [InlineKeyboardButton("⚠️ Report", callback_data=f"rate_report_AI")]
@@ -727,24 +728,14 @@ async def start_search(update, context):
                 await context.bot.send_message(partner_id, "Rate Stranger:", reply_markup=InlineKeyboardMarkup(kb_feedback))
             except: pass
             
-            # 4. DO NOT CONNECT YET.
-            # User B (You) stays in "Searching..." mode.
-            # When User A clicks "Start Matching", they will find User B immediately.
-            # We fall through to the 'else' block below to schedule the AI timer for User B just in case User A leaves.
-            pass 
+            # Fall through to schedule AI for the current user (wait logic below)
         else:
-            # Partner is truly waiting. Connect immediately.
+            # Real human match found immediately
             await connect_users(context, user_id, partner_id, common, p_mood, p_lang)
-            return # Exit function, we are connected.
+            return 
 
-    # If we are here, either no match found OR we just kicked a user and are waiting for them to re-join.
-
-        # 2. Schedule AI Fallback (15s)
-        context.job_queue.run_once(
-            check_and_connect_ghost, 
-            15, 
-            data={'uid': user_id, 'gender': u_gender, 'region': u_region}
-        )
+    # 2. Schedule AI Fallback (15s) - NEW ASYNCIO METHOD
+    asyncio.create_task(execute_ghost_search(context, user_id, u_gender, u_region))
 async def perform_match(update, context, user_id):
     partner_id, common, p_mood, p_lang = find_match(user_id)
     if partner_id:
