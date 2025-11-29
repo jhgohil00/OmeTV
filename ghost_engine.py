@@ -170,15 +170,10 @@ class GhostEngine:
             return {"type": "error", "content": f"Groq Error: {str(e)[:50]}"}
 
     def decide_game_offer(self, game_name):
-        """20% Chance to Reject, 80% Accept"""
-        if random.random() < 0.20:
-            # Rejection Responses
-            rejects = ["nah im lazy", "maybe later", "not in the mood", "meh no"]
-            return False, random.choice(rejects)
-        
-        # Acceptance Responses
-        accepts = ["sure lol", "okay lets play", "bet", "game on", "alright you start"]
-        return True, random.choice(accepts)
+        """ALWAYS REJECT GAMES (Realism)"""
+        # AI pretends to be a user who hates games or just wants to chat/skip
+        rejects = ["nah skip", "no games", "just chat", "im boring sry", "skip"]
+        return False, random.choice(rejects)
 
     def save_feedback(self, user_id, user_input, ai_response, rating):
         session = AI_SESSIONS.get(user_id)
