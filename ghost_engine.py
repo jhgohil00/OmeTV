@@ -28,7 +28,7 @@ SKIP_TRIGGERS = {
         "sex", "horny", "nude", "bobs", "vegana", "pics", "cam", "video", 
         "sexy", "hot", "dick", "cock", "fuck", 
         "suck", "meet", "number", "whatsapp", "date", 
-        "snap", "porn", , "chut", "lund", "chudai", "bye", "bot"
+        "snap", "porn", "chut", "lund", "chudai", "bye", "bot"
     ],
     # 3. MEDIUM: Normal girls - Skips direct vulgarity/demands
     "medium": [
