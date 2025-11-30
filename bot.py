@@ -1,6 +1,8 @@
 import logging
 import psycopg2
 from psycopg2 import pool
+import locales as locale_data
+from locales import get_text
 import datetime
 import asyncio
 import os
@@ -136,15 +138,19 @@ def init_db():
 # ==============================================================================
 # ⌨️ KEYBOARD LAYOUTS
 # ==============================================================================
-def get_keyboard_lobby():
+# You need to pass 'lang' to this function now
+def get_keyboard_lobby(lang="English"):
     return ReplyKeyboardMarkup([
-        [KeyboardButton("🚀 Start Matching")],
-        [KeyboardButton("🎯 Change Interests"), KeyboardButton("⚙️ Settings")],
-        [KeyboardButton("🪪 My ID"), KeyboardButton("🆘 Help")]
+        [KeyboardButton(get_text(lang, "START_BTN"))],
+        [KeyboardButton(get_text(lang, "CHANGE_INTERESTS")), KeyboardButton(get_text(lang, "SETTINGS"))],
+        [KeyboardButton(get_text(lang, "MY_ID")), KeyboardButton(get_text(lang, "HELP"))]
     ], resize_keyboard=True)
 
-def get_keyboard_searching():
-    return ReplyKeyboardMarkup([[KeyboardButton("❌ Stop Searching")]], resize_keyboard=True)
+def get_keyboard_searching(lang="English"):
+    return ReplyKeyboardMarkup(
+        [[KeyboardButton(get_text(lang, "STOP_SEARCH"))]], 
+        resize_keyboard=True
+    )
 
 def get_keyboard_chat():
     return ReplyKeyboardMarkup([
@@ -531,21 +537,43 @@ async def handle_text_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data["state"] = None
         await update.message.reply_text("✅ **Ready!**", reply_markup=get_keyboard_lobby(), parse_mode='Markdown'); return
 
-    # 4. BUTTON TEXT TRIGGERS
-    if text == "🚀 Start Matching": await start_search(update, context); return
-    if text in ["🛑 Stop", "🛑 Stop Chat"]: await stop_chat(update, context); return
-    if text == "⏭️ Next": await stop_chat(update, context, is_next=True); return
-    if text == "❌ Stop Searching": await stop_search_process(update, context); return
-    if text == "🎯 Change Interests": context.user_data["state"] = "ONBOARDING_INTEREST"; await update.message.reply_text("👇 Type interests:(separate two interest with coma)", reply_markup=ReplyKeyboardRemove()); return
-    if text == "⚙️ Settings": 
+    # 4. BUTTON TEXT TRIGGERS (MULTI-LANGUAGE SUPPORT)
+    
+    # Check Start Button (English, Indo, Hindi...)
+    all_starts = [x["START_BTN"] for x in locale_data.TEXTS.values()]
+    if text in all_starts: await start_search(update, context); return
+
+    # Check Stop Searching Button
+    all_stops = [x["STOP_SEARCH"] for x in locale_data.TEXTS.values()]
+    if text in all_stops: await stop_search_process(update, context); return
+
+    # Check Change Interests
+    all_interests = [x["CHANGE_INTERESTS"] for x in locale_data.TEXTS.values()]
+    if text in all_interests: 
+        context.user_data["state"] = "ONBOARDING_INTEREST"
+        await update.message.reply_text("👇 Type interests:", reply_markup=ReplyKeyboardRemove()); return
+
+    # Check Settings
+    all_settings = [x["SETTINGS"] for x in locale_data.TEXTS.values()]
+    if text in all_settings:
         kb = [
             [InlineKeyboardButton("🚻 Gender", callback_data="set_gen_menu"), InlineKeyboardButton("🎂 Age", callback_data="set_age_menu")],
             [InlineKeyboardButton("🗣️ Lang", callback_data="set_lang_menu"), InlineKeyboardButton("🎭 Mood", callback_data="set_mood_menu")],
             [InlineKeyboardButton("🔙 Close", callback_data="close_settings")]
         ]
         await update.message.reply_text("⚙️ **Settings:**", reply_markup=InlineKeyboardMarkup(kb), parse_mode='Markdown'); return
-    if text == "🪪 My ID": await show_profile(update, context); return
-    if text == "🆘 Help": await help_command(update, context); return
+
+    # Check My ID
+    all_ids = [x["MY_ID"] for x in locale_data.TEXTS.values()]
+    if text in all_ids: await show_profile(update, context); return
+
+    # Check Help
+    all_helps = [x["HELP"] for x in locale_data.TEXTS.values()]
+    if text in all_helps: await help_command(update, context); return
+
+    # GLOBAL COMMANDS (No translation needed for Stop/Next inside chat usually)
+    if text in ["🛑 Stop", "🛑 Stop Chat"]: await stop_chat(update, context); return
+    if text == "⏭️ Next": await stop_chat(update, context, is_next=True); return
     
     # 5. GAME MENU
     if text == "🎮 Games":
@@ -965,9 +993,22 @@ async def show_profile(update, context):
     await update.message.reply_text(text, parse_mode='Markdown')
 
 async def show_main_menu(update):
+    user = update.effective_user
+    # 1. Fetch Language from DB
+    conn = get_conn(); cur = conn.cursor()
+    cur.execute("SELECT language FROM users WHERE user_id = %s", (user.id,))
+    row = cur.fetchone()
+    user_lang = row[0] if row else "English"
+    cur.close(); release_conn(conn)
+
+    # 2. Generate Keyboard with that language
+    kb = get_keyboard_lobby(user_lang)
+
+    # 3. Send
     try: 
-        if update.message: await update.message.reply_text("👋 **Welcome to OmeTV Chatbot 🤖**", reply_markup=get_keyboard_lobby(), parse_mode='Markdown')
-        elif update.callback_query: await update.callback_query.message.reply_text("⏳ **you are in waiting Lobby...Thanks for you patience **", reply_markup=get_keyboard_lobby(), parse_mode='Markdown')
+        welcome_txt = "👋 **Welcome / Selamat Datang**" # Keep this generic or translate it too
+        if update.message: await update.message.reply_text(welcome_txt, reply_markup=kb, parse_mode='Markdown')
+        elif update.callback_query: await update.callback_query.message.reply_text("⏳ Lobby...", reply_markup=kb, parse_mode='Markdown')
     except: pass
 
 async def handle_report(update, context, reporter, reported):
