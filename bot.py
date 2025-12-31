@@ -528,8 +528,22 @@ async def handle_text_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text
     user_id = update.effective_user.id
 
-    # 1. GAME ANSWER LOGIC (The Answer)
-    # Check if this user is supposed to be answering a question
+    # --- [START OF NEW CODE PATCH] ---
+    # 2. GAME MANUAL QUESTION (The Fix)
+    if context.user_data.get("state") == "GAME_MANUAL":
+        partner_id = ACTIVE_CHATS.get(user_id)
+        if partner_id:
+             # Send the custom question to partner
+             await context.bot.send_message(partner_id, f"🎲 **QUESTION:**\n{text}\n\n*Type your answer...*", parse_mode='Markdown')
+             await update.message.reply_text(f"✅ Asked: {text}")
+             
+             # Set partner to answering mode so the turn switches correctly
+             if partner_id in GAME_STATES:
+                 GAME_STATES[partner_id]["status"] = "answering"
+                 GAME_STATES[partner_id]["turn"] = partner_id
+        
+        context.user_data["state"] = None
+        return
 
     # 3. ONBOARDING
     if context.user_data.get("state") == "ONBOARDING_INTEREST":
@@ -1119,17 +1133,18 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         gd = GAME_STATES.get(uid)
         if gd:
             q_text = gd["options"][int(data.split("_")[2])]
-            pid = gd["partner"]
+            # FIX: Use ACTIVE_CHATS to find the real partner, not the static game state
+            pid = ACTIVE_CHATS.get(uid) 
             
             # Send Question
-            await context.bot.send_message(pid, f"🎲 **QUESTION:**\n{q_text}\n\n*Type your answer...*", parse_mode='Markdown')
-            await q.edit_message_text(f"✅ Asked: {q_text}")
-            
-            # Update State: It is now PARTNER'S turn to answer. 
-            # We DO NOT send the menu yet. We wait for text input.
-            if pid in GAME_STATES: 
-                GAME_STATES[pid]["status"] = "answering"
-                GAME_STATES[pid]["turn"] = pid 
+            if pid:
+                await context.bot.send_message(pid, f"🎲 **QUESTION:**\n{q_text}\n\n*Type your answer...*", parse_mode='Markdown')
+                await q.edit_message_text(f"✅ Asked: {q_text}")
+                
+                # Update State: It is now PARTNER'S turn to answer. 
+                if pid in GAME_STATES: 
+                    GAME_STATES[pid]["status"] = "answering"
+                    GAME_STATES[pid]["turn"] = pid 
         return
     if data == "tod_manual": context.user_data["state"] = "GAME_MANUAL"; await q.edit_message_text("✍️ **Type your question now:**"); return
 # ROCK PAPER SCISSORS LOGIC
