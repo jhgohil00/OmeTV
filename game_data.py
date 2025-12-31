@@ -121,23 +121,29 @@ GAME_DATA = {
     ],
 
     "wyr": [
-        # --- CLASSIC ---
+        # --- CLASSIC & SUPERPOWERS ---
         ("Have infinite money", "Have infinite love"),
         ("Be invisible", "Be able to fly"), 
         ("Always be cold", "Always be hot"),
         ("Have unlimited money", "Have unlimited time"), 
         ("Know how you die", "Know when you die"),
-        
-        # --- INTERESTING ---
         ("Explore Space", "Explore the Ocean"), 
         ("Talk to animals", "Speak all languages"),
         ("Be a famous movie star", "Be a brilliant scientist"),
         ("Never use social media again", "Never watch movies again"),
         ("Lose your phone", "Lose your wallet"),
         ("Be the smartest person in the room", "Be the funniest person in the room"),
-	("Be the smartest person in the room", "Be the hottest person in the room"),
         ("Have a rewind button", "Have a pause button"),
-	("Date someone 10 years older", "Date someone 5 years younger"),
+        ("Be able to read minds", "Be able to see the future"),
+        ("Be feared by all", "Be loved by all"),
+        ("Never have to sleep", "Never have to eat"),
+        ("Only be able to whisper", "Only be able to shout"),
+        ("Have universal respect", "Have unlimited power"),
+        ("Live in a treehouse", "Live in a cave"),
+        ("Be 4'5\" tall", "Be 7'7\" tall"),
+
+        # --- LOVE & RELATIONSHIPS ---
+        ("Date someone 10 years older", "Date someone 5 years younger"),
         ("Have amazing sex but no conversation", "Have amazing conversation but bad sex"),
         ("Kiss in the rain", "Kiss by a fireplace"),
         ("Be the heartbreaker", "Have your heart broken"),
@@ -149,30 +155,71 @@ GAME_DATA = {
         ("Find true love but be poor", "Stay single but be a billionaire"),
         ("Have a one-night stand", "Have a 'friends with benefits' relationship"),
         ("Your partner looks through your phone", "You look through your partner's phone"),
+        ("Have no partner", "Have 3 partners"),
+        ("Stay a virgin forever", "Stay single forever"),
+        ("Kiss in public", "Kiss in a classroom"),
+        ("Marry your first love", "Marry your celebrity crush"),
+        ("Your partner is rich but boring", "Your partner is broke but hilarious"),
+
+        # --- LIFESTYLE & SITUATIONAL (Fixed & New) ---
         ("Live in the past", "Live in the future"),
-        ("Be able to read minds", "Be able to see the future"),
-        ("Give up music", "Give up Video"),
-        ("Be feared by all", "Be loved by all"),
+        ("Give up music", "Give up movies"),
         ("Have nosy neighbors", "Have noisy neighbors"),
         ("Be an average person in the present", "Be a King/Queen 1000 years ago"),
         ("Find true love today", "Win the lottery next year"),
-        ("Never have to sleep", "Never have to eat"),
-        ("Only be able to whisper", "Only be able to shout"),
-        ("Be 4'5\" tall", "Be 7'7\" tall"),
-        ("Live in a treehouse", "Live in a cave"),
-	("have universal respect", "unlimited power"),
         ("Have no taste", "Have no smell"),
-	("Have no partner", "Have 3 partner"),
         ("Always say everything on your mind", "Never be able to speak again"),
-	("can go to 10 yr in past", "can have 100 millions in present"),
-	("kiss in public", "kiss in classroom"),
-	("Stay virgin life long", "stay single life long"),
-	("visit mountains", "visit beach"),
-	("Have Piles", "Have AIDS"),
-	("hang out in night", "in evening"),
-	("sing in public", "dance in public"),
-	("watch sunset", "watch sun rise"),
-	("prefer overdressed", "under-dressed"),
-	("Be Jiws in front of Hitler", "Be American in front of Osama ")
+        ("Go 10 years into the past", "Get $10 million today"), 
+        ("Visit the mountains", "Visit the beach"),
+        ("Hang out at night", "Hang out in the evening"),
+        ("Sing in public", "Dance in public"),
+        ("Watch the sunset", "Watch the sunrise"),
+        ("Be overdressed", "Be underdressed"),
+        ("Have no internet for a month", "Have no hot water for a month"),
+        ("Be famous on Instagram", "Be famous on YouTube"),
+        ("Fight 100 duck-sized horses", "Fight 1 horse-sized duck"),
+        ("Always have a stone in your shoe", "Always have a slow internet connection"),
+
+        # --- DARK & DEEP ---
+        ("Save 100 strangers", "Save 1 family member"),
+        ("Know all the world's secrets", "Live in blissful ignorance"),
+        ("Restart your life at age 10", "Fast forward to age 40 with $50M"),
+        ("Be in jail for 5 years", "Be in a coma for 10 years"),
+        ("Die happy in 5 years", "Die miserable in 100 years"),
+        ("Accidentally send a sext to your boss", "Accidentally send a sext to your mom"),
+        ("Have everyone know your search history", "Have everyone know your financial status"),
+        
+        # --- CRAZY & FUNNY ---
+        ("Have fingers as long as legs", "Have legs as long as fingers"),
+        ("Sweat mayonnaise", "Cry orange juice"),
+        ("Have a head the size of a tennis ball", "Have a head the size of a watermelon"),
+        ("Talk like Yoda", "Walk like a penguin"),
+        ("Have a constant itch", "Have a constant hiccup"),
+        ("Use sandpaper as toilet paper", "Use hot sauce as eye drops"),
+		# --- CRAZY, CLINGY & 18+ (Patch) ---
+        ("Let me track your live location 24/7", "Let me read your chats every night"),
+        ("Quickie in a car", "Quickie in an elevator"),
+        ("Swallow", "Spit"),
+	
+	# --- KINKY & FANTASY (Roleplay/Supernatural) ---
+        ("Roleplay as a student & teacher", "Roleplay: Doctor & Patient"),
+        ("like to have partner like vampire (biting involved)", "Like a werewolf (scratching involved)"),
+        ("Be hypnotized to do anything I say", "Hypnotize me to do anything you say"),
+        ("Have a clone of yourself for a threesome", "Have a clone of me for a threesome"),
+        ("Do Romance in zero gravity (floating)", "Do it underwater (breathing magic)"),
+        ("Be my personal servant in a fantasy kingdom", "Be the ruler who owns me"),
+       
+        ("Be handcuffed", "Be blindfolded"),
+        ("I tie you up", "You tie me up"),
+        ("Be teased with an ice cube while blindfolded", "Be teased with ice cream while handcuffed"),
+        
+	# --- CLINGY & OBSESSIVE (Crazy but Safe-ish) ---
+        ("Have a joint social media account", "Have a joint bank account"),
+        ("Text me every 10 minutes", "Call me every hour"),
+        ("Tell me every thought you have", "Let me watch you 24*7"),
+        ("Move in together after 1 week", "Get married after 1 month"),
+        ("Let me brush your hair", "Let me feed you dinner"),
+        ("Be attacked by a zombie", "Be attacked by a shark")
     ]
 }
+
